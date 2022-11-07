@@ -13,6 +13,7 @@ from torch import Tensor
 from PIL import Image
 import click
 import clip
+from easydict import EasyDict
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -22,6 +23,7 @@ except ImportError:
 
 # set device and load clip
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device {device}")
 
 # CLIP Setup
 print(f"Available CLiP models - {clip.available_models()}")
@@ -46,7 +48,7 @@ to_tensor = transforms.ToTensor()
 # fmt: off
 # noinspection PyUnresolvedReferences
 @click.command()
-# Required arguments:
+## Required arguments:
 @click.option("-i", "--input_image", type=click.Path(file_okay=True, dir_okay=False),
               required=True, help="path to the target image")
 
@@ -58,14 +60,26 @@ to_tensor = transforms.ToTensor()
 @click.option("--init_image", type=click.BOOL, required=False, default=False,
               help="whether to init the net input to the target image",
               show_default=True)
+@click.option("--straight_through", type=click.BOOL, required=False, default=True,
+              help="whether to use the straight through softmax",
+              show_default=True)
 @click.option("--learn_colors", type=click.BOOL, required=False, default=False,
               help="whether to learn the color palette over training",
               show_default=True)
-@click.option("--by distance", type=click.BOOL, required=False, default=False,
+@click.option("--by_distance", type=click.BOOL, required=False, default=False,
               help="whether to init the net input to the target image",
               show_default=True)
 @click.option("--temperature", type=click.FLOAT, required=False, default=1000.0,
               help="softmax temperature",
+              show_default=True)
+@click.option("--canvas_h", type=click.INT, required=False, default=32,
+              help="canvas height",
+              show_default=True)
+@click.option("--canvas_w", type=click.INT, required=False, default=32,
+              help="canvas width",
+              show_default=True)
+@click.option("--num_colors", type=click.INT, required=False, default=6,
+              help="number of colors in palette",
               show_default=True)
 
 # Losses
@@ -73,11 +87,55 @@ to_tensor = transforms.ToTensor()
               help="l2 weight", show_default=True)
 @click.option("--style_weight", type=click.FLOAT, required=False, default=0.25,
               help="style weight", show_default=True)
+@click.option("--style_prompt", type=click.STRING, required=False, default="pixel art",
+              help="style input prompt", show_default=True)
 @click.option("--semantic_weight", type=click.FLOAT, required=False, default=0.25,
               help="semantic weight", show_default=True)
 @click.option("--geometric_weight", type=click.FLOAT, required=False, default=0.25,
-              help="semantic weight", show_default=True)
+              help="geometric weight", show_default=True)
 
+# Training
+@click.option("--lr", type=click.FLOAT, required=False, default=0.0005,
+              help="learning rate", show_default=True)
+@click.option("--save_freq", type=click.INT, required=False, default=100,
+              help="frequency to save results in", show_default=True)
+@click.option("--epochs", type=click.INT, required=False, default=2000,
+              help="number of epochs", show_default=True)
+
+
+# fmt: on
+# -------------------------------------------------------------------------------------
+
+def main(**kwargs) -> None:
+    # load the requested configuration for the training
+    config = EasyDict(kwargs)
+
+    # get image and palette
+    image_path = "inputs" / Path(config.input_image)
+    target, palette = get_target_and_palette(image_path, config.num_colors)
+
+    # get canvas class
+    canvas = canvas_selector(palette, target, config.use_dip, config.straight_through,
+                            config.init_image, config.by_distance, config.canvas_h, config.canvas_w,
+                            224, 224, config.temperature)
+    
+    # set losses
+    loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
+                          torch.tensor([0.0]).to(device))
+    loss_dict["semantic"] = torch.tensor([config.semantic_weight]).to(device)
+    loss_dict["style"] = torch.tensor([config.style_weight]).to(device)
+    loss_dict["geometric"] = torch.tensor([config.geometric_weight]).to(device)
+    loss_dict['l2'] = torch.tensor([config.l2_weight]).to(device)
+    clip_conv_layer_weights = [0, 0.0, 1.0, 1.0, 0]
+
+    loss_fn = PixelArtLoss(clip_model,
+                           target,
+                           loss_dict,
+                           clip_conv_layer_weights,
+                           config.style_prompt)
+
+    # set optimizer
+    optimizer = torch.optim.Adam(canvas.parameters(), lr=config.lr)
 
 ####################################
 #### STRAIGHT THROUGH EXPONENT #####
@@ -466,6 +524,63 @@ class Canvas_DIP_by_distance(nn.Module):
     colors_upscaled = torch.squeeze(colors_upscaled)
     return colors_upscaled
 
+def canvas_selector(palette: Tensor,
+                    target: Tensor,
+                    use_dip: bool, 
+                    straight_through: bool,
+                    image_init: bool,
+                    by_distance: bool, 
+                    canvas_h: int, 
+                    canvas_w: int, 
+                    im_h: int,
+                    im_w: int,
+                    temperature: float,
+                    ):
+  if use_dip:
+    if by_distance:
+      print("Selecting: DIP by distance")
+      canvas = Canvas_DIP_by_distance(palette,
+                      target, 
+                      canvas_h,
+                      canvas_w,
+                      im_h,
+                      im_w,
+                      temperature,
+                      straight_through,
+                      image_init=image_init)
+    else:
+      print("Selecting: DIP")
+      canvas = Canvas_DIP(palette,
+                      target, 
+                      canvas_h,
+                      canvas_w,
+                      im_h,
+                      im_w,
+                      temperature,
+                      straight_through,
+                      image_init=image_init)
+  else:
+    if g_by_distance:
+      print("Selecting: No DIP - by distance")
+      canvas = Canvas_by_Distance(palette,
+                      canvas_h,
+                      canvas_w,
+                      im_h,
+                      im_w,
+                      temperature,
+                      straight_through)
+    else:
+      print("Selecting: No DIP")
+      canvas = Canvas(palette,
+                      canvas_h,
+                      canvas_w,
+                      im_h,
+                      im_w,
+                      temperature,
+                      straight_through)
+  
+  return canvas
+
 ### Clip Visual Encoder class (from CLIPasso): ###
 
 class CLIPVisualEncoder(nn.Module):
@@ -598,7 +713,7 @@ class PixelArtLoss(nn.Module):
 
 def get_target_and_palette(img_filepath: str, num_clusters: int):
   img = Image.open(img_filepath).convert("RGB")
-  t_img = to_tensor(img)
+  t_img = torch.unsqueeze(to_tensor(img), 0)
   open_cv_image = np.array(img) 
   
   # Convert RGB to BGR 
@@ -614,7 +729,7 @@ def get_target_and_palette(img_filepath: str, num_clusters: int):
   center_pil = Image.fromarray(center.astype(np.uint8))
   t_centers = to_tensor(center_pil)
 
-  return t_img, t_centers
+  return t_img.to(device), t_centers.to(device)
 
 #################################
 ###### PLOTTING FUNCTIONS  ######
@@ -757,9 +872,6 @@ plt.savefig(output_path, bbox_inches='tight')
 plt.show()
 plot_loss_graph(checkpoints, g_num_clusters)
 '''
-
-def main():   
-    print("Hello World")
 
 if __name__ == "__main__":
     main()
