@@ -5,11 +5,13 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from pathlib import Path
 from torchvision import transforms
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from typing import Tuple
 from torch import Tensor
 from PIL import Image
+import click
 import clip
 
 try:
@@ -20,6 +22,8 @@ except ImportError:
 
 # set device and load clip
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# CLIP Setup
 print(f"Available CLiP models - {clip.available_models()}")
 clip_model, clip_preprocess = clip.load("ViT-B/32", device=device)
 
@@ -31,19 +35,53 @@ def clip_transform(n_px):
         transforms.Normalize((0.48145466, 0.4578275, 0.40821073), 
                              (0.26862954, 0.26130258, 0.27577711)),
     ])
+
 clip_tensor_preprocess = clip_transform(224)
 to_PIL = transforms.ToPILImage()
 to_tensor = transforms.ToTensor()
 
-"""### Globals:"""
+# -------------------------------------------------------------------------------------
+#  Command line configuration for the script                                          |
+# -------------------------------------------------------------------------------------
+# fmt: off
+# noinspection PyUnresolvedReferences
+@click.command()
+# Required arguments:
+@click.option("-i", "--input_image", type=click.Path(file_okay=True, dir_okay=False),
+              required=True, help="path to the target image")
 
-g_num_clusters = 6
-g_im_h = 224
-g_im_w = 224
-g_canvas_h = 32
-g_canvas_w = 32
+# Non-required Configurations options:
+# Pipeline
+@click.option("--use_dip", type=click.BOOL, required=False, default=True,
+              help="whether to use Deep Image Priors in the pipeline",
+              show_default=True)
+@click.option("--init_image", type=click.BOOL, required=False, default=False,
+              help="whether to init the net input to the target image",
+              show_default=True)
+@click.option("--learn_colors", type=click.BOOL, required=False, default=False,
+              help="whether to learn the color palette over training",
+              show_default=True)
+@click.option("--by distance", type=click.BOOL, required=False, default=False,
+              help="whether to init the net input to the target image",
+              show_default=True)
+@click.option("--temperature", type=click.FLOAT, required=False, default=1000.0,
+              help="softmax temperature",
+              show_default=True)
 
-"""### Straight Through Exponents:"""
+# Losses
+@click.option("--l2_weight", type=click.FLOAT, required=False, default=1.0,
+              help="l2 weight", show_default=True)
+@click.option("--style_weight", type=click.FLOAT, required=False, default=0.25,
+              help="style weight", show_default=True)
+@click.option("--semantic_weight", type=click.FLOAT, required=False, default=0.25,
+              help="semantic weight", show_default=True)
+@click.option("--geometric_weight", type=click.FLOAT, required=False, default=0.25,
+              help="semantic weight", show_default=True)
+
+
+####################################
+#### STRAIGHT THROUGH EXPONENT #####
+####################################
 
 class ST_exp(torch.autograd.Function):
   @staticmethod
@@ -595,6 +633,8 @@ def plot_loss_graph(checkpoints: list,
   plt.savefig(output_path)
   plt.show()
 
+
+
 ################################
 ########     MAIN     ##########
 ################################
@@ -614,7 +654,11 @@ g_straight_through = True
 g_by_distance = False
 g_style_prompt = 'pixel art'
 g_learn_colors = True
-g_target, g_palette = get_target_and_palette("test", 3)
+g_num_clusters = 6
+g_im_h = 224
+g_im_w = 224
+g_canvas_h = 32
+g_canvas_w = 32
 
 """### Setting Classes:"""
 '''
@@ -714,5 +758,8 @@ plt.show()
 plot_loss_graph(checkpoints, g_num_clusters)
 '''
 
-if __name__ == "__main__":
+def main():   
     print("Hello World")
+
+if __name__ == "__main__":
+    main()
