@@ -13,6 +13,7 @@ from torch import Tensor
 from PIL import Image
 import click
 import clip
+import os
 from easydict import EasyDict
 
 try:
@@ -60,7 +61,7 @@ to_tensor = transforms.ToTensor()
 @click.option("--init_image", type=click.BOOL, required=False, default=False,
               help="whether to init the net input to the target image",
               show_default=True)
-@click.option("--straight_through", type=click.BOOL, required=False, default=True,
+@click.option("--straight_through", type=click.BOOL, required=False, default=False,
               help="whether to use the straight through softmax",
               show_default=True)
 @click.option("--learn_colors", type=click.BOOL, required=False, default=False,
@@ -85,13 +86,13 @@ to_tensor = transforms.ToTensor()
 # Losses
 @click.option("--l2_weight", type=click.FLOAT, required=False, default=1.0,
               help="l2 weight", show_default=True)
-@click.option("--style_weight", type=click.FLOAT, required=False, default=0.25,
+@click.option("--style_weight", type=click.FLOAT, required=False, default=0.0,
               help="style weight", show_default=True)
 @click.option("--style_prompt", type=click.STRING, required=False, default="pixel art",
               help="style input prompt", show_default=True)
-@click.option("--semantic_weight", type=click.FLOAT, required=False, default=0.25,
+@click.option("--semantic_weight", type=click.FLOAT, required=False, default=0.0,
               help="semantic weight", show_default=True)
-@click.option("--geometric_weight", type=click.FLOAT, required=False, default=0.25,
+@click.option("--geometric_weight", type=click.FLOAT, required=False, default=0.0,
               help="geometric weight", show_default=True)
 
 # Training
@@ -99,7 +100,7 @@ to_tensor = transforms.ToTensor()
               help="learning rate", show_default=True)
 @click.option("--save_freq", type=click.INT, required=False, default=100,
               help="frequency to save results in", show_default=True)
-@click.option("--epochs", type=click.INT, required=False, default=2000,
+@click.option("--epochs", type=click.INT, required=False, default=1000,
               help="number of epochs", show_default=True)
 
 
@@ -116,8 +117,8 @@ def main(**kwargs) -> None:
 
     # get canvas class
     canvas = canvas_selector(palette, target, config.use_dip, config.straight_through,
-                            config.init_image, config.by_distance, config.canvas_h, config.canvas_w,
-                            224, 224, config.temperature)
+                            config.init_image, config.by_distance, config.canvas_h, config.canvas_w, 
+                            config.temperature)
     
     # set losses
     loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
@@ -136,6 +137,101 @@ def main(**kwargs) -> None:
 
     # set optimizer
     optimizer = torch.optim.Adam(canvas.parameters(), lr=config.lr)
+
+    #----------------#
+    # Training Loop:
+    #----------------#
+
+    checkpoints = []
+    for iter in range(config.epochs):
+      optimizer.zero_grad()
+      output = canvas()
+      loss = loss_fn(output)
+      loss.backward()
+      optimizer.step()
+      if (iter % config.save_freq == 0):
+        checkpoint = {}
+        checkpoint["iteration"] = iter
+        checkpoint["loss"] = loss.item()
+        print(f"Iter: {iter}, Loss: {loss.item()}")
+        checkpoint["frame"] = torch.squeeze(output).cpu().detach()
+        checkpoints.append(checkpoint)
+
+    # Save Results:
+    plot_results(checkpoints, config)
+
+####################################
+####     PLOTTING FUNCTIONS    #####
+####################################
+
+def to8b(x: np.array) -> np.array:
+    return (255 * np.clip(x, 0, 1)).astype(np.uint8)
+
+def plot_results(checkpoints, config):
+  losses = [x['loss'] for x in checkpoints]
+  tmp = min(losses)
+  idx = losses.index(tmp)
+  frame = checkpoints[idx]['frame']
+  frame_pil = to_PIL(frame)
+  title = f"{config.num_colors} colors \n l2 {config.l2_weight}, semantic {config.semantic_weight},geometric {config.geometric_weight}, style {config.style_weight}\n use dip {config.use_dip},straight through {config.straight_through} \nby distance {config.by_distance} \nstyle prompt - {config.style_prompt}"
+  filename = f"{config.num_colors}_colors_l2_{config.l2_weight}_semantic_{config.semantic_weight}_geometric_{config.geometric_weight}_style_{config.style_weight}_dip_{config.use_dip}_straight_through_{config.straight_through}_by_distance_{config.by_distance}_prompt_{config.style_prompt}_{config.input_image}"
+  filename = filename.replace(".", "_")
+  filename = filename.replace(" ", "_")
+  filename = filename.replace("/", "")
+  print(f"Filename: {filename}")
+  output_path_image = f"results/images/{filename}"
+  output_path_graph = f"results/graphs/{filename}"
+
+  # frame
+  plt.figure(0)
+  plt.imshow(frame_pil)
+  plt.title(title)
+  plt.savefig(output_path_image, bbox_inches='tight')
+  plt.show()
+
+  # loss graph
+  iters = [x['iteration'] for x in checkpoints]
+  plt.figure(1)
+  plt.plot(iters, losses)
+  plt.title(f"{config.input_image}\n{title}")
+  plt.xlabel("Iterations")
+  plt.ylabel("Loss")
+  plt.tight_layout()
+  plt.savefig(output_path_graph)
+  plt.show()
+
+  # training lapse
+  frameSize = (600, 600)
+  fourcc = cv2.VideoWriter_fourcc(*'MP4V')
+  output_path_lapse = f"results/lapses/{filename}.mp4"
+  out = cv2.VideoWriter(str(output_path_lapse), fourcc, 2.0, frameSize)
+  # font
+  font = cv2.FONT_HERSHEY_SIMPLEX
+  
+  # org
+  org = (35, 35)
+  
+  # fontScale
+  fontScale = 1
+  
+  # Blue color in BGR
+  color = (0, 0, 0)
+  
+  # Line thickness of 2 px
+  thickness = 2
+  for checkpoint in checkpoints:
+    frame = torch.permute(checkpoint["frame"], (1, 2, 0)).numpy()
+    img = to8b(frame)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, frameSize, interpolation = cv2.INTER_NEAREST)
+    iter = checkpoint["iteration"]
+    loss = checkpoint["loss"]
+    text = f"Iter: {iter:4}, Loss: {loss:6.4f}"
+    img = cv2.putText(img, text, org, font, fontScale, color, thickness, cv2.LINE_AA)
+    out.write(img)
+  
+  print("Finished rendering training lapse!")
+  out.release()
 
 ####################################
 #### STRAIGHT THROUGH EXPONENT #####
@@ -431,11 +527,11 @@ class Canvas_DIP(nn.Module):
       small = True
     
     if image_init:
-      self.backbone = UNet(3, g_num_clusters, small=small).to(device)
+      self.backbone = UNet(3, self.num_colors, small=small).to(device)
       self.net_input = transforms.Resize((128, 128))(target.detach())
     else:
-      self.backbone = UNet(g_num_clusters, g_num_clusters, small=small).to(device)
-      self.net_input = get_noise(g_num_clusters, 'noise', (128, 128)).to(device).detach()   
+      self.backbone = UNet(self.num_colors, self.num_colors, small=small).to(device)
+      self.net_input = get_noise(self.num_colors, 'noise', (128, 128)).to(device).detach()   
 
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
@@ -488,8 +584,8 @@ class Canvas_DIP_by_distance(nn.Module):
       self.backbone = UNet(3, 3, small=small).to(device)
       self.net_input = transforms.Resize((128, 128))(target.detach())
     else:
-      self.backbone = UNet(g_num_clusters, 3, small=small).to(device)
-      self.net_input = get_noise(g_num_clusters, 'noise', (128, 128)).to(device).detach()   
+      self.backbone = UNet(self.num_colors, 3, small=small).to(device)
+      self.net_input = get_noise(self.num_colors, 'noise', (128, 128)).to(device).detach()   
 
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
@@ -532,10 +628,9 @@ def canvas_selector(palette: Tensor,
                     by_distance: bool, 
                     canvas_h: int, 
                     canvas_w: int, 
-                    im_h: int,
-                    im_w: int,
                     temperature: float,
                     ):
+  _, _, im_h, im_w = target.size()
   if use_dip:
     if by_distance:
       print("Selecting: DIP by distance")
@@ -560,7 +655,7 @@ def canvas_selector(palette: Tensor,
                       straight_through,
                       image_init=image_init)
   else:
-    if g_by_distance:
+    if by_distance:
       print("Selecting: No DIP - by distance")
       canvas = Canvas_by_Distance(palette,
                       canvas_h,
@@ -728,6 +823,7 @@ def get_target_and_palette(img_filepath: str, num_clusters: int):
   center = cv2.cvtColor(center, cv2.COLOR_BGR2RGB)
   center_pil = Image.fromarray(center.astype(np.uint8))
   t_centers = to_tensor(center_pil)
+  t_centers = torch.squeeze(torch.permute(t_centers, (2, 1, 0)))
 
   return t_img.to(device), t_centers.to(device)
 
@@ -748,130 +844,6 @@ def plot_loss_graph(checkpoints: list,
   plt.savefig(output_path)
   plt.show()
 
-
-
-################################
-########     MAIN     ##########
-################################
-
-# 0. Set Globals
-g_num_epochs = 2000
-g_save_freq = 100
-g_lr = 0.0005
-g_use_dip = True
-g_image_init = False
-g_temperature = 10000.0
-g_style_w = 0.25
-g_semantic_w = 0.25
-g_l2_w = 1.00
-g_geometric_w = 0.25
-g_straight_through = True
-g_by_distance = False
-g_style_prompt = 'pixel art'
-g_learn_colors = True
-g_num_clusters = 6
-g_im_h = 224
-g_im_w = 224
-g_canvas_h = 32
-g_canvas_w = 32
-
-"""### Setting Classes:"""
-'''
-# 1. Set Canvas
-if g_use_dip:
-  if g_by_distance:
-    canvas = Canvas_DIP_by_distance(g_palette,
-                    g_target, 
-                    g_canvas_h,
-                    g_canvas_w,
-                    g_im_h,
-                    g_im_w,
-                    g_temperature,
-                    g_straight_through,
-                    image_init=g_image_init)
-  else:
-    canvas = Canvas_DIP(g_palette,
-                    g_target, 
-                    g_canvas_h,
-                    g_canvas_w,
-                    g_im_h,
-                    g_im_w,
-                    g_temperature,
-                    g_straight_through,
-                    image_init=g_image_init,
-                    learn_colors=g_learn_colors)
-else:
-  if g_by_distance:
-    print("No DIP - by distance")
-    canvas = Canvas_by_Distance(g_palette,
-                    g_canvas_h,
-                    g_canvas_w,
-                    g_im_h,
-                    g_im_w,
-                    g_temperature,
-                    g_straight_through)
-  else:
-    print("No DIP")
-    canvas = Canvas(g_palette,
-                    g_canvas_h,
-                    g_canvas_w,
-                    g_im_h,
-                    g_im_w,
-                    g_temperature,
-                    g_straight_through)
-
-# 2. Set Losses
-loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
-                          torch.tensor([0.0]).to(device))
-loss_dict["semantic"] = torch.tensor([g_semantic_w]).to(device)
-loss_dict["style"] = torch.tensor([g_style_w]).to(device)
-loss_dict["geometric"] = torch.tensor([g_geometric_w]).to(device)
-loss_dict['l2'] = torch.tensor([g_l2_w]).to(device)
-clip_conv_layer_weights = [0, 0.0, 1.0, 1.0, 0]
-
-loss_fn = PixelArtLoss(clip_model,
-                       g_target,
-                       loss_dict,
-                       clip_conv_layer_weights,
-                       g_style_prompt)
-
-# 3. Set optimizer
-optimizer = torch.optim.Adam(canvas.parameters(), lr=g_lr)
-
-"""### Training Loop:"""
-
-checkpoints = []
-
-for iter in range(g_num_epochs):
-  optimizer.zero_grad()
-  output = canvas()
-  loss = loss_fn(output)
-  loss.backward()
-  optimizer.step()
-  if (iter % g_save_freq == 0):
-    checkpoint = {}
-    checkpoint["iteration"] = iter
-    checkpoint["loss"] = loss.item()
-    print(loss.item())
-    checkpoint["frame"] = output.cpu().detach()
-    checkpoints.append(checkpoint)
-
-"""### Display Final Result:"""
-
-losses = [x['loss'] for x in checkpoints]
-tmp = min(losses)
-idx = losses.index(tmp)
-frame = torch.squeeze(checkpoints[idx]['frame'])
-frame_pil = to_PIL(frame)
-title = f"{g_num_clusters} colors\n l2 {g_l2_w}, semantic {g_semantic_w}, geometric {g_geometric_w}, style {g_style_w}\n use dip {g_use_dip}, straight through {g_straight_through} \nby distance {g_by_distance} \nstyle prompt - {g_style_prompt}"
-filename = f"{g_num_clusters}_colors_l2_{g_l2_w}_semantic_{g_semantic_w}_geometric_{g_geometric_w}_style_{g_style_w}_dip_{g_use_dip}_straight_through_{g_straight_through}_by_distance_{g_by_distance}_prompt_{g_style_prompt}_{img_filename}"
-output_path = f"/content/drive/MyDrive/Personal Thesis stuff/PixelArtClipasso2/{filename}"
-plt.title(title)
-plt.imshow(frame_pil)
-plt.savefig(output_path, bbox_inches='tight')
-plt.show()
-plot_loss_graph(checkpoints, g_num_clusters)
-'''
 
 if __name__ == "__main__":
     main()
