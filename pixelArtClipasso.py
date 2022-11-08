@@ -173,8 +173,8 @@ def plot_results(checkpoints, config):
   idx = losses.index(tmp)
   frame = checkpoints[idx]['frame']
   frame_pil = to_PIL(frame)
-  title = f"{config.num_colors} colors \n l2 {config.l2_weight}, semantic {config.semantic_weight},geometric {config.geometric_weight}, style {config.style_weight}\n use dip {config.use_dip},straight through {config.straight_through} \nby distance {config.by_distance} \nstyle prompt - {config.style_prompt}"
-  filename = f"{config.num_colors}_colors_l2_{config.l2_weight}_semantic_{config.semantic_weight}_geometric_{config.geometric_weight}_style_{config.style_weight}_dip_{config.use_dip}_straight_through_{config.straight_through}_by_distance_{config.by_distance}_prompt_{config.style_prompt}_{config.input_image}"
+  title = f"{config.num_colors} colors \n l2 {config.l2_weight}, semantic {config.semantic_weight},geometric {config.geometric_weight}, style {config.style_weight}\n use dip {config.use_dip},straight through {config.straight_through} \nby distance {config.by_distance}, image init {config.image_init} \nstyle prompt - {config.style_prompt}"
+  filename = f"{config.num_colors}_colors_l2_{config.l2_weight}_semantic_{config.semantic_weight}_geometric_{config.geometric_weight}_style_{config.style_weight}_dip_{config.use_dip}_straight_through_{config.straight_through}_by_distance_{config.by_distance}_image_init_{config.image_init}_prompt_{config.style_prompt}_{config.input_image}"
   filename = filename.replace(".", "_")
   filename = filename.replace(" ", "_")
   filename = filename.replace("/", "")
