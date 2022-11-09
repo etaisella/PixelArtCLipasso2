@@ -36,9 +36,9 @@ train() {
 input=flamingo.png
 use_dip=True
 l2_weight=1.0
-semantic_weight=0.05
-geometric_weight=0.1
-style_weight=0.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.05
 straight_through=True
 num_colors=6
 
@@ -48,9 +48,9 @@ $style_weight $straight_through $num_colors
 input=3dMario.png
 use_dip=True
 l2_weight=1.0
-semantic_weight=0.05
-geometric_weight=0.1
-style_weight=0.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.05
 straight_through=True
 num_colors=6
 
@@ -60,9 +60,9 @@ $style_weight $straight_through $num_colors
 input=bowser.png
 use_dip=True
 l2_weight=1.0
-semantic_weight=0.05
-geometric_weight=0.1
-style_weight=0.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.05
 straight_through=True
 num_colors=6
 
@@ -72,9 +72,9 @@ $style_weight $straight_through $num_colors
 input=camel.png
 use_dip=True
 l2_weight=1.0
-semantic_weight=0.05
-geometric_weight=0.1
-style_weight=0.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.05
 straight_through=True
 num_colors=6
 
@@ -84,9 +84,9 @@ $style_weight $straight_through $num_colors
 input=clown_fish.png
 use_dip=True
 l2_weight=1.0
-semantic_weight=0.05
-geometric_weight=0.1
-style_weight=0.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.05
 straight_through=True
 num_colors=6
 
@@ -96,9 +96,9 @@ $style_weight $straight_through $num_colors
 input=goldfish.png
 use_dip=True
 l2_weight=1.0
-semantic_weight=0.05
-geometric_weight=0.1
-style_weight=0.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.05
 straight_through=True
 num_colors=6
 
@@ -108,9 +108,9 @@ $style_weight $straight_through $num_colors
 input=obama.png
 use_dip=True
 l2_weight=1.0
-semantic_weight=0.05
-geometric_weight=0.1
-style_weight=0.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.05
 straight_through=True
 num_colors=6
 

@@ -42,7 +42,7 @@ geometric_weight=0.0
 style_weight=0.0
 straight_through=True
 num_colors=6
-init_image=True
+init_image=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors $init_image
@@ -55,7 +55,7 @@ geometric_weight=0.0
 style_weight=0.0
 straight_through=True
 num_colors=6
-init_image=True
+init_image=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors $init_image
@@ -68,7 +68,7 @@ geometric_weight=0.0
 style_weight=0.0
 straight_through=True
 num_colors=6
-init_image=True
+init_image=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors $init_image
@@ -81,7 +81,7 @@ geometric_weight=0.0
 style_weight=0.0
 straight_through=True
 num_colors=6
-init_image=True
+init_image=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors $init_image
@@ -94,7 +94,7 @@ geometric_weight=0.0
 style_weight=0.0
 straight_through=True
 num_colors=6
-init_image=True
+init_image=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors $init_image
@@ -107,7 +107,7 @@ geometric_weight=0.0
 style_weight=0.0
 straight_through=True
 num_colors=6
-init_image=True
+init_image=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors $init_image
@@ -120,7 +120,7 @@ geometric_weight=0.0
 style_weight=0.0
 straight_through=True
 num_colors=6
-init_image=True
+init_image=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors $init_image
