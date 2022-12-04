@@ -4,12 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from torchvision import transforms
+from datetime import datetime
 from PIL import Image
 import click
 import clip
 from canvas import *
 from loss import PixelArtLoss
 from easydict import EasyDict
+from clearml import Task
+import wandb
+
+
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -84,20 +89,29 @@ to_tensor = transforms.ToTensor()
               help="learning rate", show_default=True)
 @click.option("--save_freq", type=click.INT, required=False, default=100,
               help="frequency to save results in", show_default=True)
-@click.option("--epochs", type=click.INT, required=False, default=1000,
+@click.option("--epochs", type=click.INT, required=False, default=2000,
               help="number of epochs", show_default=True)
+@click.option("--start_semantics_iter", type=click.INT, required=False, default=1000,
+              help="the epoch where we start using semantic losses", show_default=True)
 
 
 # fmt: on
 # -------------------------------------------------------------------------------------
 
 def main(**kwargs) -> None:
+    #task = Task.init(project_name='PixelArtClipasso v2', task_name='Experiment 0')
+
     # load the requested configuration for the training
     config = EasyDict(kwargs)
+    wandb.init(project='pixelArtClipasso v2', entity="etaisella",
+                   config=dict(config), name="test " + str(datetime.now()), 
+                   id=wandb.util.generate_id())
+
 
     # get image and palette
     image_path = "inputs" / Path(config.input_image)
     target, palette = get_target_and_palette(image_path, config.num_colors)
+    wandb.log({"input": wandb.Image(target)}, step=0)
 
     # get canvas class
     canvas = canvas_selector(device, palette, target, config.use_dip, config.straight_through,
@@ -105,7 +119,7 @@ def main(**kwargs) -> None:
                             config.temperature)
     
     # set losses
-    loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
+    loss_dict = loss_dict_l2_only = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
                           torch.tensor([0.0]).to(device))
     loss_dict["semantic"] = torch.tensor([config.semantic_weight]).to(device)
     loss_dict["style"] = torch.tensor([config.style_weight]).to(device)
@@ -113,10 +127,20 @@ def main(**kwargs) -> None:
     loss_dict['l2'] = torch.tensor([config.l2_weight]).to(device)
     clip_conv_layer_weights = [0, 0.0, 1.0, 1.0, 0]
 
-    loss_fn = PixelArtLoss(clip_model,
+    # loss function with semantics as well as l2
+    loss_fn_full = PixelArtLoss(clip_model,
                            device,
                            target,
                            loss_dict,
+                           clip_conv_layer_weights,
+                           config.style_prompt)
+    
+    # loss function with l2 only
+    loss_dict_l2_only['l2'] = torch.tensor([1.0]).to(device)
+    loss_fn_l2_only = PixelArtLoss(clip_model,
+                           device,
+                           target,
+                           loss_dict_l2_only,
                            clip_conv_layer_weights,
                            config.style_prompt)
 
@@ -131,19 +155,29 @@ def main(**kwargs) -> None:
     for iter in range(config.epochs):
       optimizer.zero_grad()
       output = canvas()
-      loss = loss_fn(output)
+      if (iter >= config.start_semantics_iter):
+        loss, loss_dict = loss_fn_full(output)
+      else:
+        loss, loss_dict = loss_fn_l2_only(output)
       loss.backward()
       optimizer.step()
-      if (iter % config.save_freq == 0):
+      if (iter % config.save_freq == 0) or (iter == config.epochs - 1):
         checkpoint = {}
         checkpoint["iteration"] = iter
         checkpoint["loss"] = loss.item()
-        print(f"Iter: {iter}, Loss: {loss.item()}")
         checkpoint["frame"] = torch.squeeze(output).cpu().detach()
         checkpoints.append(checkpoint)
+        print(f"Iter: {iter}, Loss: {loss.item()}")
 
+        # wandb logging:
+        wandb.log({"overall loss": loss.item()}, step=iter)
+        wandb.log({"Output": wandb.Image(checkpoint["frame"])}, step=iter)
+        for k in loss_dict.keys():
+          wandb.log({k + "_loss": loss_dict[k]}, step=iter)
+        
     # Save Results:
     plot_results(checkpoints, config)
+    wandb.finish()
 
 ####################################
 ####     PLOTTING FUNCTIONS    #####

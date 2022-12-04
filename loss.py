@@ -127,28 +127,35 @@ class PixelArtLoss(nn.Module):
     # set losses to apply and weights
     self.losses_to_apply = []
     self.weights_to_apply = []
+    self.loss_names = []
 
     if (weight_dict["l2"] != 0):
+      self.loss_names.append("l2")
       self.losses_to_apply.append(self.l2)
       self.weights_to_apply.append(weight_dict["l2"])
 
     if (weight_dict["semantic"] != 0):
+      self.loss_names.append("semantic")
       self.losses_to_apply.append(self.semantic_loss)
       self.weights_to_apply.append(weight_dict["semantic"])
     
     if (weight_dict["style"] != 0):
+      self.loss_names.append("style")
       self.losses_to_apply.append(self.pa_style_loss)
       self.weights_to_apply.append(weight_dict["style"])
     
     if (weight_dict["geometric"] != 0):
+      self.loss_names.append("geometric")
       self.losses_to_apply.append(self.geometric_loss)
       self.weights_to_apply.append(weight_dict["geometric"])
     
 
   def forward(self, x: Tensor) -> Tensor:
+    loss_dict = {}
     loss = torch.tensor([0.0]).to(self.device)
-    #loss_input = torch.unsqueeze(clip_tensor_preprocess(x), 0)
-    for loss_fn, w in zip(self.losses_to_apply, self.weights_to_apply):
-      loss = loss + w * loss_fn(x)
+    for loss_fn, w, name in zip(self.losses_to_apply, self.weights_to_apply, self.loss_names):
+      curr_loss = loss_fn(x)
+      loss_dict[name] = curr_loss.item()
+      loss = loss + w * curr_loss
     
-    return loss
+    return loss, loss_dict
