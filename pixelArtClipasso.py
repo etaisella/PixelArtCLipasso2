@@ -71,6 +71,9 @@ to_tensor = transforms.ToTensor()
 @click.option("--num_colors", type=click.INT, required=False, default=6,
               help="number of colors in palette",
               show_default=True)
+@click.option("--old_method", type=click.BOOL, required=False, default=False,
+              help="determines whether to use the old method of argmax, which uses temperature",
+              show_default=False)
 
 # Losses
 @click.option("--l2_weight", type=click.FLOAT, required=False, default=1.0,
@@ -85,11 +88,15 @@ to_tensor = transforms.ToTensor()
               help="geometric weight", show_default=True)
 
 # Training
-@click.option("--lr", type=click.FLOAT, required=False, default=0.0005,
+@click.option("--lr", type=click.FLOAT, required=False, default=0.00005,
               help="learning rate", show_default=True)
+@click.option("--start_anneal_iter", type=click.INT, required=False, default=1500,
+              help="Iteration in which we start to anneal learning rate", show_default=True)
+@click.option("--lr_gamma", type=click.FLOAT, required=False, default=0.65,
+              help="gamma by which we reduce learning rate", show_default=True)
 @click.option("--save_freq", type=click.INT, required=False, default=100,
               help="frequency to save results in", show_default=True)
-@click.option("--epochs", type=click.INT, required=False, default=2000,
+@click.option("--epochs", type=click.INT, required=False, default=5000,
               help="number of epochs", show_default=True)
 @click.option("--start_semantics_iter", type=click.INT, required=False, default=1000,
               help="the epoch where we start using semantic losses", show_default=True)
@@ -112,20 +119,25 @@ def main(**kwargs) -> None:
     image_path = "inputs" / Path(config.input_image)
     target, palette = get_target_and_palette(image_path, config.num_colors)
     wandb.log({"input": wandb.Image(target)}, step=0)
+    wandb.log({"palette": wandb.Image(torch.unsqueeze(torch.permute(palette, (1, 0)), dim=-2))}, step=0)
 
     # get canvas class
     canvas = canvas_selector(device, palette, target, config.use_dip, config.straight_through,
                             config.init_image, config.by_distance, config.canvas_h, config.canvas_w, 
-                            config.temperature)
+                            config.temperature, config.old_method)
     
     # set losses
-    loss_dict = loss_dict_l2_only = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
+    loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
+                          torch.tensor([0.0]).to(device))
+    loss_dict_l2_only = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
                           torch.tensor([0.0]).to(device))
     loss_dict["semantic"] = torch.tensor([config.semantic_weight]).to(device)
     loss_dict["style"] = torch.tensor([config.style_weight]).to(device)
     loss_dict["geometric"] = torch.tensor([config.geometric_weight]).to(device)
     loss_dict['l2'] = torch.tensor([config.l2_weight]).to(device)
     clip_conv_layer_weights = [0, 0.0, 1.0, 1.0, 0]
+
+    print(f"Loss dict: \n {loss_dict}")
 
     # loss function with semantics as well as l2
     loss_fn_full = PixelArtLoss(clip_model,
@@ -144,8 +156,9 @@ def main(**kwargs) -> None:
                            clip_conv_layer_weights,
                            config.style_prompt)
 
-    # set optimizer
+    # set optimizer & scheduler
     optimizer = torch.optim.Adam(canvas.parameters(), lr=config.lr)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.lr_gamma)
 
     #----------------#
     # Training Loop:
@@ -169,7 +182,12 @@ def main(**kwargs) -> None:
         checkpoints.append(checkpoint)
         print(f"Iter: {iter}, Loss: {loss.item()}")
 
+        # LR Scheduling:
+        if iter >= config.start_anneal_iter:
+          scheduler.step()
+
         # wandb logging:
+        wandb.log({"current learning rate:": float(scheduler.get_last_lr()[0])}, step=iter)
         wandb.log({"overall loss": loss.item()}, step=iter)
         wandb.log({"Output": wandb.Image(checkpoint["frame"])}, step=iter)
         for k in loss_dict.keys():
@@ -192,8 +210,8 @@ def plot_results(checkpoints, config):
   idx = losses.index(tmp)
   frame = checkpoints[idx]['frame']
   frame_pil = to_PIL(frame)
-  title = f"{config.num_colors} colors \n l2 {config.l2_weight}, semantic {config.semantic_weight},geometric {config.geometric_weight}, style {config.style_weight}\n use dip {config.use_dip},straight through {config.straight_through} \nby distance {config.by_distance}, image init {config.init_image} \nstyle prompt - {config.style_prompt}"
-  filename = f"{config.num_colors}_colors_l2_{config.l2_weight}_semantic_{config.semantic_weight}_geometric_{config.geometric_weight}_style_{config.style_weight}_dip_{config.use_dip}_straight_through_{config.straight_through}_by_distance_{config.by_distance}_image_init_{config.init_image}_prompt_{config.style_prompt}_{config.input_image}"
+  title = f"{config.num_colors} colors \n l2 {config.l2_weight}, semantic {config.semantic_weight},geometric {config.geometric_weight}, style {config.style_weight}\n use dip {config.use_dip},straight through {config.straight_through} \nby distance {config.by_distance}, image init {config.init_image} \nstyle prompt - {config.style_prompt}, old method {config.old_method}"
+  filename = f"{config.num_colors}_colors_l2_{config.l2_weight}_semantic_{config.semantic_weight}_geometric_{config.geometric_weight}_style_{config.style_weight}_dip_{config.use_dip}_straight_through_{config.straight_through}_by_distance_{config.by_distance}_image_init_{config.init_image}_prompt_{config.style_prompt}_oldm_{config.old_method}_{config.input_image}"
   filename = filename.replace(".", "_")
   filename = filename.replace(" ", "_")
   filename = filename.replace("/", "")

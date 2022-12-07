@@ -4,7 +4,7 @@ import torch
 from torchvision import transforms
 from torch import Tensor
 from unet import UNet, get_noise
-from straightThroughSoftMax import ST_SoftMax
+from straightThroughSoftMax import ST_SoftMax, StraightThroughSoftMax
 
 ###############################
 ####### CANVAS CLASSES ########
@@ -17,7 +17,8 @@ class Canvas(nn.Module):
                canvas_w: int,
                image_h: int,
                image_w: int,
-               temperature: float=10000.0, 
+               temperature: float=10000.0,
+               old_method: bool=False, 
                straight_through=True):
     super().__init__()
     self.num_colors = palette.size(dim=0)
@@ -32,7 +33,10 @@ class Canvas(nn.Module):
     self.weight = torch.nn.parameter.Parameter(data=weights, requires_grad=True)
     self.palette = palette
     self.temperature = temperature
-    self.st_softmax = ST_SoftMax(temperature)
+    if old_method:
+      self.st_softmax = ST_SoftMax(temperature)
+    else:
+      self.st_softmax = StraightThroughSoftMax()
     self.softmax = torch.nn.Softmax(dim=-1)
   
   def forward(self) -> Tensor:
@@ -55,7 +59,8 @@ class Canvas_by_Distance(nn.Module):
                canvas_w: int,
                image_h: int,
                image_w: int,
-               temperature: float=10000.0, 
+               temperature: float=10000.0,
+               old_method: bool=False,
                straight_through=True):
     super().__init__()
     self.num_colors = palette.size(dim=0)
@@ -73,7 +78,10 @@ class Canvas_by_Distance(nn.Module):
     self.palette_repeated[:, :] = self.palette
     self.palette_repeated = torch.permute(self.palette_repeated, (-2, 0, 1, -1))
     self.temperature = temperature
-    self.st_softmax = ST_SoftMax(temperature)
+    if old_method:
+      self.st_softmax = ST_SoftMax(temperature)
+    else:
+      self.st_softmax = StraightThroughSoftMax()
     self.softmax = torch.nn.Softmax(dim=-1)
   
   def forward(self) -> Tensor:
@@ -107,7 +115,8 @@ class Canvas_DIP(nn.Module):
                canvas_w: int,
                image_h: int,
                image_w: int,
-               temperature: float=10000.0, 
+               temperature: float=10000.0,
+               old_method: bool=False,
                straight_through=True,
                image_init=True,
                learn_colors=False):
@@ -120,15 +129,15 @@ class Canvas_DIP(nn.Module):
 
     # Set UNet backbone
     small = False
-    if canvas_h == 32 and canvas_w == 32:
+    if canvas_h <= 32 and canvas_w <= 32:
       small = True
     
     if image_init:
       self.backbone = UNet(3, self.num_colors, small=small).to(device)
-      self.net_input = transforms.Resize((128, 128))(target.detach())
+      self.net_input = transforms.Resize((int(canvas_h * 4), int(canvas_w * 4)))(target.detach())
     else:
       self.backbone = UNet(self.num_colors, self.num_colors, small=small).to(device)
-      self.net_input = get_noise(self.num_colors, 'noise', (128, 128)).to(device).detach()   
+      self.net_input = get_noise(self.num_colors, 'noise', (int(canvas_h * 4), int(canvas_w * 4))).to(device).detach()   
 
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
@@ -137,7 +146,10 @@ class Canvas_DIP(nn.Module):
     else:
       self.palette = palette
     self.temperature = temperature
-    self.st_softmax = ST_SoftMax(temperature)
+    if old_method:
+      self.st_softmax = ST_SoftMax(temperature)
+    else:
+      self.st_softmax = StraightThroughSoftMax()
     self.softmax = torch.nn.Softmax(dim=-1)
   
   def forward(self) -> Tensor:
@@ -163,7 +175,8 @@ class Canvas_DIP_by_distance(nn.Module):
                canvas_w: int,
                image_h: int,
                image_w: int,
-               temperature: float=10000.0, 
+               temperature: float=10000.0,
+               old_method: bool=False,
                straight_through=True,
                image_init=True):
     super().__init__()
@@ -175,15 +188,15 @@ class Canvas_DIP_by_distance(nn.Module):
 
     # Set UNet backbone
     small = False
-    if canvas_h == 32 and canvas_w == 32:
+    if canvas_h <= 32 and canvas_w <= 32:
       small = True
     
     if image_init:
-      self.backbone = UNet(3, 3, small=small).to(device)
-      self.net_input = transforms.Resize((128, 128))(target.detach())
+      self.backbone = UNet(3, self.num_colors, small=small).to(device)
+      self.net_input = transforms.Resize((int(canvas_h * 4), int(canvas_w * 4)))(target.detach())
     else:
-      self.backbone = UNet(self.num_colors, 3, small=small).to(device)
-      self.net_input = get_noise(self.num_colors, 'noise', (128, 128)).to(device).detach()   
+      self.backbone = UNet(self.num_colors, self.num_colors, small=small).to(device)
+      self.net_input = get_noise(self.num_colors, 'noise', (int(canvas_h * 4), int(canvas_w * 4))).to(device).detach()      
 
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
@@ -193,7 +206,10 @@ class Canvas_DIP_by_distance(nn.Module):
     self.palette_repeated[:, :] = self.palette
     self.palette_repeated = torch.permute(self.palette_repeated, (-2, 0, 1, -1))
     self.temperature = temperature
-    self.st_softmax = ST_SoftMax(temperature)
+    if old_method:
+      self.st_softmax = ST_SoftMax(temperature)
+    else:
+      self.st_softmax = StraightThroughSoftMax()
     self.softmax = torch.nn.Softmax(dim=-1)
   
   def forward(self) -> Tensor:
@@ -228,6 +244,7 @@ def canvas_selector(device,
                     canvas_h: int, 
                     canvas_w: int, 
                     temperature: float,
+                    old_method: bool=False
                     ):
   _, _, im_h, im_w = target.size()
   if use_dip:
@@ -241,6 +258,7 @@ def canvas_selector(device,
                       im_h,
                       im_w,
                       temperature,
+                      old_method,
                       straight_through,
                       image_init=image_init)
     else:
@@ -253,6 +271,7 @@ def canvas_selector(device,
                       im_h,
                       im_w,
                       temperature,
+                      old_method,
                       straight_through,
                       image_init=image_init)
   else:
@@ -265,6 +284,7 @@ def canvas_selector(device,
                       im_h,
                       im_w,
                       temperature,
+                      old_method,
                       straight_through)
     else:
       print("Selecting: No DIP")
@@ -275,6 +295,7 @@ def canvas_selector(device,
                       im_h,
                       im_w,
                       temperature,
+                      old_method,
                       straight_through)
   
   return canvas

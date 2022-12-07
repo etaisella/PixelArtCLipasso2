@@ -20,27 +20,49 @@ train() {
 	echo "Starting Training..."
 	python pixelArtClipasso.py \
 	-i ${1}/ \
+	--canvas_h=32 \
+	--canvas_w=32 \
 	--use_dip=${2} \
 	--l2_weight=${3} \
 	--semantic_weight=${4} \
 	--geometric_weight=${5} \
 	--style_weight=${6} \
 	--straight_through=${7} \
-	--num_colors=${8}
+	--num_colors=${8} \
+	--by_distance=${9} \
+	--old_method=${10}
 }
 
 # STARTING RUN:
 
 # With straight through
 
-input=flamingo.png
+input=mario_wbg2.png
 use_dip=True
 l2_weight=1.0
 semantic_weight=0.0
 geometric_weight=0.0
-style_weight=0.15
+style_weight=0.0
 straight_through=True
-num_colors=6
+num_colors=4
+by_distance=False
+old_method=False
 
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors
+$style_weight $straight_through $num_colors $by_distance $old_method
+
+# With straight through
+
+input=mario_wbg2.png
+use_dip=True
+l2_weight=1.0
+semantic_weight=0.0
+geometric_weight=0.0
+style_weight=0.0
+straight_through=True
+num_colors=4
+by_distance=False
+old_method=True
+
+train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
+$style_weight $straight_through $num_colors $by_distance $old_method

@@ -155,7 +155,7 @@ class PixelArtLoss(nn.Module):
     loss = torch.tensor([0.0]).to(self.device)
     for loss_fn, w, name in zip(self.losses_to_apply, self.weights_to_apply, self.loss_names):
       curr_loss = loss_fn(x)
-      loss_dict[name] = curr_loss.item()
+      loss_dict[name] = w * curr_loss.item()
       loss = loss + w * curr_loss
     
     return loss, loss_dict
