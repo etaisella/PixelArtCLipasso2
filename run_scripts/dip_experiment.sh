@@ -34,83 +34,11 @@ train() {
 # With straight through
 
 input=flamingo.png
-use_dip=False
-l2_weight=1.0
+use_dip=True
+l2_weight=0.0
 semantic_weight=0.0
 geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=6
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors
-
-input=3dMario.png
-use_dip=False
-l2_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=6
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors
-
-input=bowser.png
-use_dip=False
-l2_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=6
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors
-
-input=camel.png
-use_dip=False
-l2_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=6
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors
-
-input=clown_fish.png
-use_dip=False
-l2_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=6
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors
-
-input=goldfish.png
-use_dip=False
-l2_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=6
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors
-
-input=obama.png
-use_dip=False
-l2_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
+style_weight=1.0
 straight_through=True
 num_colors=6
 

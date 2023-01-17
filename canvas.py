@@ -17,7 +17,7 @@ class Canvas(nn.Module):
                canvas_w: int,
                image_h: int,
                image_w: int,
-               temperature: float=10000.0,
+               temperature: float=1.0,
                old_method: bool=False, 
                straight_through=True):
     super().__init__()
@@ -115,8 +115,7 @@ class Canvas_DIP(nn.Module):
                canvas_w: int,
                image_h: int,
                image_w: int,
-               temperature: float=10000.0,
-               old_method: bool=False,
+               temperature: float=1.0,
                straight_through=True,
                image_init=True,
                learn_colors=False):
@@ -146,24 +145,28 @@ class Canvas_DIP(nn.Module):
     else:
       self.palette = palette
     self.temperature = temperature
-    if old_method:
-      self.st_softmax = ST_SoftMax(temperature)
-    else:
-      self.st_softmax = StraightThroughSoftMax()
+    self.st_softmax = StraightThroughSoftMax()
     self.softmax = torch.nn.Softmax(dim=-1)
   
   def forward(self) -> Tensor:
     weight = self.backbone(self.net_input)
     weight = torch.permute(torch.squeeze(weight), (1, 2, 0))
-    if self.straight_through:
-      norm_weights = self.st_softmax(weight)
-    else:
-      norm_weights = self.softmax(weight * self.temperature)
+
+    # Smooth output:
+    norm_weights = self.softmax(weight)
     colors = torch.matmul(norm_weights, self.palette)
     colors = colors.permute(2, 0, 1)
     colors_upscaled = self.upsample(torch.unsqueeze(colors, 0))
     colors_upscaled = torch.squeeze(colors_upscaled)
-    return colors_upscaled
+
+    # PA Output:
+    norm_weights_pa = self.st_softmax(weight)
+    colors_pa = torch.matmul(norm_weights_pa, self.palette)
+    colors_pa = colors_pa.permute(2, 0, 1)
+    colors_upscaled_pa = self.upsample(torch.unsqueeze(colors_pa, 0))
+    colors_upscaled_pa = torch.squeeze(colors_upscaled_pa)
+
+    return colors_upscaled, colors_upscaled_pa
 
 ### Canvas Class DIP by distance: ###
 
@@ -271,7 +274,6 @@ def canvas_selector(device,
                       im_h,
                       im_w,
                       temperature,
-                      old_method,
                       straight_through,
                       image_init=image_init)
   else:

@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import collections
 import clip
+import numpy as np
+import matplotlib.pyplot as plt
+import wandb
 from PIL import Image
 from torchvision import transforms
 from torch import Tensor
@@ -22,6 +25,9 @@ def clip_transform(n_px):
     ])
 
 clip_tensor_preprocess = clip_transform(224)
+
+def to8b(x: np.array) -> np.array:
+    return (255 * np.clip(x, 0, 1)).astype(np.uint8)
 
 ### Clip Visual Encoder class (from CLIPasso): ###
 
@@ -54,6 +60,69 @@ class CLIPVisualEncoder(nn.Module):
 ############################
 ###### Loss Classes  #######
 ############################
+
+class ShiftAwareLoss(torch.nn.Module):
+  def __init__(self, target: Tensor, canvas_h: int, canvas_w: int):
+    super().__init__()
+    self.step = 0
+    n, c, h, w = target.shape
+    self.block_size_sq = int(h / canvas_h)
+    self.target = target
+    target_nhwc = torch.permute(target, (0, 2, 3, 1))
+    self.background_mask = torch.squeeze(torch.logical_and(torch.logical_and(target_nhwc[..., 0] == 1.0, \
+      target_nhwc[..., 1] == 1.0), target_nhwc[..., 2] == 1.0))
+    self.loss_class = torch.nn.L1Loss(reduction='none')
+    self.upsample = torch.nn.Upsample(size=(h, w))
+  
+  def forward(self, x: Tensor) -> Tensor:
+    diff_img = torch.squeeze(torch.mean(self.loss_class(x, torch.squeeze(self.target)), dim=0))
+    diff_img[self.background_mask] = 100.0
+    max_pool = nn.MaxPool2d(self.block_size_sq, stride=self.block_size_sq)
+    min_image_small = -max_pool(-torch.unsqueeze(diff_img, dim=0))
+    min_image = torch.squeeze(self.upsample(torch.unsqueeze(min_image_small, dim=0)))
+    min_image[min_image == 100.0] = 0.0
+    min_image[self.background_mask] = 0.0
+    diff_img[self.background_mask] = 0.0
+
+    if self.step % 50 == 0:
+      fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+      diff_image_np = to8b(diff_img.detach().cpu().numpy())
+      ax1.imshow(diff_image_np, cmap='jet')
+      ax1.set_title("Diff Image")
+
+      min_image_np = to8b(min_image.detach().cpu().numpy())
+      ax2.imshow(min_image_np, cmap='jet')
+      ax2.set_title("Min diff Image")
+
+      plt.tight_layout()
+      wandb.log({"SA Min Diff image": wandb.Image(plt)}, step=self.step)
+
+    self.step = self.step + 1
+    return torch.mean(min_image)
+
+class SemanticStyleLoss(torch.nn.Module):
+  def __init__(self, clip_model, device):
+    super().__init__()
+    self.device = device
+    self.loss_fn = torch.nn.BCELoss()
+    self.clip_model = clip_model
+    text_prompts = ["pixel art", 
+                    "pixelized image",
+                    "downsampled image"]
+    text_prompts = [x.strip() for x in text_prompts]
+
+    with torch.no_grad():
+      self.target_features = clip.tokenize(text_prompts).to(device)
+  
+  def forward(self, x: Tensor) -> Tensor:
+    # input here needs to be a clip encoding of the input image
+    x_preprocessed = torch.unsqueeze(clip_tensor_preprocess(x), 0)
+    logits_per_image, _ = self.clip_model(x_preprocessed, self.target_features)
+    probs = logits_per_image.softmax(dim=-1).float()
+    print(f"Probs: {probs}")
+    targets = torch.tensor([[1.0, 0.0, 0.0]], device=self.device).float()
+    loss = self.loss_fn(probs, targets)
+    return loss
 
 class SemanticLoss(torch.nn.Module):
   def __init__(self, clip_model, target_features):
@@ -105,7 +174,9 @@ class PixelArtLoss(nn.Module):
                target: Tensor, 
                weight_dict: dict,
                conv_weights,
-               style_prompt):
+               style_prompt,
+               canvas_h,
+               canvas_w):
     super().__init__()
     self.device = device
     self.clip_model = clip_model
@@ -120,9 +191,11 @@ class PixelArtLoss(nn.Module):
     # set loss classes
     self.l2 = L2Loss(self.target_tensor)
     self.semantic_loss = SemanticLoss(clip_model, self.target_features)
-    self.pa_style_loss = SemanticLoss(clip_model, self.text_style_feature)
+    #self.pa_style_loss = SemanticLoss(clip_model, self.text_style_feature)
+    self.pa_style_loss = SemanticStyleLoss(clip_model, device)
     self.geometric_loss = GeometricLoss(clip_model, device, conv_weights, 
                                         self.target_preprocessed)
+    self.shift_aware_loss = ShiftAwareLoss(target, canvas_h, canvas_w)
 
     # set losses to apply and weights
     self.losses_to_apply = []
@@ -149,12 +222,20 @@ class PixelArtLoss(nn.Module):
       self.losses_to_apply.append(self.geometric_loss)
       self.weights_to_apply.append(weight_dict["geometric"])
     
+    if (weight_dict["shift_aware"] != 0):
+      self.loss_names.append("shift_aware")
+      self.losses_to_apply.append(self.shift_aware_loss)
+      self.weights_to_apply.append(weight_dict["shift_aware"])
+    
 
-  def forward(self, x: Tensor) -> Tensor:
+  def forward(self, x: Tensor, x_pa: Tensor=None) -> Tensor:
     loss_dict = {}
     loss = torch.tensor([0.0]).to(self.device)
     for loss_fn, w, name in zip(self.losses_to_apply, self.weights_to_apply, self.loss_names):
-      curr_loss = loss_fn(x)
+      if name == "shift_aware" and x_pa != None:
+        curr_loss = loss_fn(x_pa)
+      else:
+        curr_loss = loss_fn(x)
       loss_dict[name] = w * curr_loss.item()
       loss = loss + w * curr_loss
     

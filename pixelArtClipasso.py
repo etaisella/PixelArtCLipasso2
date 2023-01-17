@@ -11,7 +11,6 @@ import clip
 from canvas import *
 from loss import PixelArtLoss
 from easydict import EasyDict
-from clearml import Task
 import wandb
 
 
@@ -86,19 +85,21 @@ to_tensor = transforms.ToTensor()
               help="semantic weight", show_default=True)
 @click.option("--geometric_weight", type=click.FLOAT, required=False, default=0.0,
               help="geometric weight", show_default=True)
+@click.option("--shift_aware_weight", type=click.FLOAT, required=False, default=0.0,
+              help="shift aware weight", show_default=True)
 
 # Training
 @click.option("--lr", type=click.FLOAT, required=False, default=0.00005,
               help="learning rate", show_default=True)
 @click.option("--start_anneal_iter", type=click.INT, required=False, default=1500,
               help="Iteration in which we start to anneal learning rate", show_default=True)
-@click.option("--lr_gamma", type=click.FLOAT, required=False, default=0.65,
+@click.option("--lr_gamma", type=click.FLOAT, required=False, default=1.0,
               help="gamma by which we reduce learning rate", show_default=True)
 @click.option("--save_freq", type=click.INT, required=False, default=100,
               help="frequency to save results in", show_default=True)
 @click.option("--epochs", type=click.INT, required=False, default=5000,
               help="number of epochs", show_default=True)
-@click.option("--start_semantics_iter", type=click.INT, required=False, default=1000,
+@click.option("--start_semantics_iter", type=click.INT, required=False, default=2500,
               help="the epoch where we start using semantic losses", show_default=True)
 
 
@@ -114,6 +115,9 @@ def main(**kwargs) -> None:
                    config=dict(config), name="test " + str(datetime.now()), 
                    id=wandb.util.generate_id())
 
+    # freeze clip parameters
+    for parameter in clip_model.parameters():
+        parameter.requires_grad = False
 
     # get image and palette
     image_path = "inputs" / Path(config.input_image)
@@ -127,14 +131,15 @@ def main(**kwargs) -> None:
                             config.temperature, config.old_method)
     
     # set losses
-    loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
+    loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware"], 
                           torch.tensor([0.0]).to(device))
-    loss_dict_l2_only = dict.fromkeys(["l2", "semantic", "style", "geometric"], 
+    loss_dict_l2_only = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware"], 
                           torch.tensor([0.0]).to(device))
     loss_dict["semantic"] = torch.tensor([config.semantic_weight]).to(device)
     loss_dict["style"] = torch.tensor([config.style_weight]).to(device)
     loss_dict["geometric"] = torch.tensor([config.geometric_weight]).to(device)
     loss_dict['l2'] = torch.tensor([config.l2_weight]).to(device)
+    loss_dict['shift_aware'] = torch.tensor([config.shift_aware_weight]).to(device)
     clip_conv_layer_weights = [0, 0.0, 1.0, 1.0, 0]
 
     print(f"Loss dict: \n {loss_dict}")
@@ -145,7 +150,9 @@ def main(**kwargs) -> None:
                            target,
                            loss_dict,
                            clip_conv_layer_weights,
-                           config.style_prompt)
+                           config.style_prompt,
+                           config.canvas_h, 
+                           config.canvas_w,)
     
     # loss function with l2 only
     loss_dict_l2_only['l2'] = torch.tensor([1.0]).to(device)
@@ -154,7 +161,9 @@ def main(**kwargs) -> None:
                            target,
                            loss_dict_l2_only,
                            clip_conv_layer_weights,
-                           config.style_prompt)
+                           config.style_prompt,
+                           config.canvas_h, 
+                           config.canvas_w,)
 
     # set optimizer & scheduler
     optimizer = torch.optim.Adam(canvas.parameters(), lr=config.lr)
@@ -167,7 +176,7 @@ def main(**kwargs) -> None:
     checkpoints = []
     for iter in range(config.epochs):
       optimizer.zero_grad()
-      output = canvas()
+      output, output_pa = canvas()
       if (iter >= config.start_semantics_iter):
         loss, loss_dict = loss_fn_full(output)
       else:
@@ -179,6 +188,7 @@ def main(**kwargs) -> None:
         checkpoint["iteration"] = iter
         checkpoint["loss"] = loss.item()
         checkpoint["frame"] = torch.squeeze(output).cpu().detach()
+        checkpoint["pixel art frame"] = torch.squeeze(output_pa).cpu().detach()
         checkpoints.append(checkpoint)
         print(f"Iter: {iter}, Loss: {loss.item()}")
 
@@ -190,6 +200,7 @@ def main(**kwargs) -> None:
         wandb.log({"current learning rate:": float(scheduler.get_last_lr()[0])}, step=iter)
         wandb.log({"overall loss": loss.item()}, step=iter)
         wandb.log({"Output": wandb.Image(checkpoint["frame"])}, step=iter)
+        wandb.log({"Output PA": wandb.Image(checkpoint["pixel art frame"])}, step=iter)
         for k in loss_dict.keys():
           wandb.log({k + "_loss": loss_dict[k]}, step=iter)
         
