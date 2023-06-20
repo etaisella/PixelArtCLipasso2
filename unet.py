@@ -72,11 +72,11 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, small=False):
+    def __init__(self, n_channels, n_classes, ratio):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
-        self.small = small
+        self.ratio = ratio
 
         self.inc = DoubleConv(n_channels, 64)
         self.down1 = Down(64, 128)
@@ -87,6 +87,8 @@ class UNet(nn.Module):
         self.up2 = Up(512, 256)
         self.up2_small = Up(512, 64)
         self.up3 = Up(256, 64)
+        self.up3_big = Up(256, 128)
+        self.up4_big = Up(128, 64)
         self.outc = OutConv(64, n_classes)
 
     def forward(self, x):
@@ -96,8 +98,12 @@ class UNet(nn.Module):
         x4 = self.down3(x3)
         x5 = self.down4(x4)
         x = self.up1(x5, x4)
-        if self.small:
+        if self.ratio == 0.25:
             x = self.up2_small(x, x3)
+        elif self.ratio == 1.0:
+            x = self.up2(x, x3)
+            x = self.up3_big(x, x2)
+            x = self.up4_big(x, x1)
         else:
             x = self.up2(x, x3)
             x = self.up3(x, x2)

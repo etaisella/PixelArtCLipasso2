@@ -1,27 +1,19 @@
-# This file may be used to create an environment using:
-# $ conda create --name <env> --file <this file>
-# platform: linux-64
-@EXPLICIT
-https://repo.anaconda.com/pkgs/main/linux-64/_libgcc_mutex-0.1-main.conda
-https://repo.anaconda.com/pkgs/main/linux-64/ca-certificates-2022.10.11-h06a4308_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/ld_impl_linux-64-2.38-h1181459_1.conda
-https://repo.anaconda.com/pkgs/main/linux-64/libstdcxx-ng-11.2.0-h1234567_1.conda
-https://repo.anaconda.com/pkgs/main/noarch/tzdata-2022f-h04d1e81_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/libgomp-11.2.0-h1234567_1.conda
-https://repo.anaconda.com/pkgs/main/linux-64/_openmp_mutex-5.1-1_gnu.conda
-https://repo.anaconda.com/pkgs/main/linux-64/libgcc-ng-11.2.0-h1234567_1.conda
-https://repo.anaconda.com/pkgs/main/linux-64/bzip2-1.0.8-h7b6447c_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/libffi-3.3-he6710b0_2.conda
-https://repo.anaconda.com/pkgs/main/linux-64/libuuid-1.0.3-h7f8727e_2.conda
-https://repo.anaconda.com/pkgs/main/linux-64/ncurses-6.3-h5eee18b_3.conda
-https://repo.anaconda.com/pkgs/main/linux-64/openssl-1.1.1s-h7f8727e_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/xz-5.2.6-h5eee18b_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/zlib-1.2.13-h5eee18b_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/readline-8.2-h5eee18b_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/tk-8.6.12-h1ccaba5_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/sqlite-3.39.3-h5082296_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/python-3.10.4-h12debd9_0.tar.bz2
-https://repo.anaconda.com/pkgs/main/linux-64/certifi-2022.9.24-py310h06a4308_0.conda
-https://repo.anaconda.com/pkgs/main/noarch/wheel-0.37.1-pyhd3eb1b0_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/setuptools-65.5.0-py310h06a4308_0.conda
-https://repo.anaconda.com/pkgs/main/linux-64/pip-22.2.2-py310h06a4308_0.conda
+numpy==1.22.4
+torch==1.13.1
+Pillow==9.1.1
+torchvision
+matplotlib==3.5.2
+tqdm==4.64.0
+imageio==2.19.2
+imageio-ffmpeg==0.4.7
+click==8.1.3
+easydict==1.9
+PyYAML==6.0
+kmeans-pytorch
+wandb
+datetime
+scipy
+numpy
+GPUtil
+opencv-python
+git+https://github.com/openai/CLIP.git

@@ -73,13 +73,16 @@ to_tensor = transforms.ToTensor()
 @click.option("--old_method", type=click.BOOL, required=False, default=False,
               help="determines whether to use the old method of argmax, which uses temperature",
               show_default=False)
+@click.option("--no_palette_mode", type=click.BOOL, required=False, default=False,
+              help="determines whether to not use a palette and just directly learn a canvas",
+              show_default=False)
 
 # Losses
 @click.option("--l2_weight", type=click.FLOAT, required=False, default=1.0,
               help="l2 weight", show_default=True)
 @click.option("--style_weight", type=click.FLOAT, required=False, default=0.0,
               help="style weight", show_default=True)
-@click.option("--style_prompt", type=click.STRING, required=False, default="pixel art",
+@click.option("--style_prompt", type=click.STRING, required=False, default="none",
               help="style input prompt", show_default=True)
 @click.option("--semantic_weight", type=click.FLOAT, required=False, default=0.0,
               help="semantic weight", show_default=True)
@@ -97,9 +100,9 @@ to_tensor = transforms.ToTensor()
               help="gamma by which we reduce learning rate", show_default=True)
 @click.option("--save_freq", type=click.INT, required=False, default=100,
               help="frequency to save results in", show_default=True)
-@click.option("--epochs", type=click.INT, required=False, default=5000,
+@click.option("--epochs", type=click.INT, required=False, default=16000,
               help="number of epochs", show_default=True)
-@click.option("--start_semantics_iter", type=click.INT, required=False, default=2500,
+@click.option("--start_semantics_iter", type=click.INT, required=False, default=1,
               help="the epoch where we start using semantic losses", show_default=True)
 
 
@@ -128,7 +131,7 @@ def main(**kwargs) -> None:
     # get canvas class
     canvas = canvas_selector(device, palette, target, config.use_dip, config.straight_through,
                             config.init_image, config.by_distance, config.canvas_h, config.canvas_w, 
-                            config.temperature, config.old_method)
+                            config.temperature, config.old_method, config.no_palette_mode)
     
     # set losses
     loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware"], 

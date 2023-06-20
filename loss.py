@@ -76,17 +76,17 @@ class ShiftAwareLoss(torch.nn.Module):
   
   def forward(self, x: Tensor) -> Tensor:
     diff_img = torch.squeeze(torch.mean(self.loss_class(x, torch.squeeze(self.target)), dim=0))
+    diff_img_orig = torch.clone(diff_img)
     diff_img[self.background_mask] = 100.0
     max_pool = nn.MaxPool2d(self.block_size_sq, stride=self.block_size_sq)
     min_image_small = -max_pool(-torch.unsqueeze(diff_img, dim=0))
     min_image = torch.squeeze(self.upsample(torch.unsqueeze(min_image_small, dim=0)))
-    min_image[min_image == 100.0] = 0.0
-    min_image[self.background_mask] = 0.0
-    diff_img[self.background_mask] = 0.0
+    big_background_pixel_mask = (min_image == 100.0)
+    min_image[big_background_pixel_mask] = diff_img_orig[big_background_pixel_mask]
 
     if self.step % 50 == 0:
       fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-      diff_image_np = to8b(diff_img.detach().cpu().numpy())
+      diff_image_np = to8b(diff_img_orig.detach().cpu().numpy())
       ax1.imshow(diff_image_np, cmap='jet')
       ax1.set_title("Diff Image")
 
@@ -95,7 +95,10 @@ class ShiftAwareLoss(torch.nn.Module):
       ax2.set_title("Min diff Image")
 
       plt.tight_layout()
-      wandb.log({"SA Min Diff image": wandb.Image(plt)}, step=self.step)
+      wandb.log({"SA image": wandb.Image(plt)}, step=self.step)
+      plt.savefig('my_plot.png')
+      plt.close()
+
 
     self.step = self.step + 1
     return torch.mean(min_image)
@@ -106,9 +109,9 @@ class SemanticStyleLoss(torch.nn.Module):
     self.device = device
     self.loss_fn = torch.nn.BCELoss()
     self.clip_model = clip_model
-    text_prompts = ["pixel art", 
-                    "pixelized image",
-                    "downsampled image"]
+    text_prompts = ["a vibrant pink pixel art flamingo with black legs", 
+                    "pixelized image of a flamingo",
+                    "downsampled image of a flamingo"]
     text_prompts = [x.strip() for x in text_prompts]
 
     with torch.no_grad():
@@ -119,7 +122,6 @@ class SemanticStyleLoss(torch.nn.Module):
     x_preprocessed = torch.unsqueeze(clip_tensor_preprocess(x), 0)
     logits_per_image, _ = self.clip_model(x_preprocessed, self.target_features)
     probs = logits_per_image.softmax(dim=-1).float()
-    print(f"Probs: {probs}")
     targets = torch.tensor([[1.0, 0.0, 0.0]], device=self.device).float()
     loss = self.loss_fn(probs, targets)
     return loss
@@ -183,8 +185,11 @@ class PixelArtLoss(nn.Module):
     self.clip_model.eval()
     self.target_tensor = target
     self.target_preprocessed = clip_tensor_preprocess(target)
-    self.target_features = clip_model.encode_image(self.target_preprocessed).detach()
-    text = clip.tokenize(style_prompt).to(device)
+    if style_prompt == "none":
+      self.target_features = clip_model.encode_image(self.target_preprocessed).detach()
+    else:
+      text = clip.tokenize(style_prompt).to(device)
+      self.target_features = clip_model.encode_text(text).detach()
     self.text_style_feature = clip_model.encode_text(text).detach()
     self.weight_table = weight_dict
 

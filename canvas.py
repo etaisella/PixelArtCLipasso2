@@ -107,6 +107,55 @@ class Canvas_by_Distance(nn.Module):
 
 ### Canvas Class DIP: ###
 
+class Canvas_No_Palette(nn.Module):
+  def __init__(self, device,
+               target: Tensor, 
+               canvas_h: int,
+               canvas_w: int,
+               image_h: int,
+               image_w: int,
+               image_init=True
+               ):
+    super().__init__()
+    self.h = canvas_h
+    self.w = canvas_w
+    self.im_h = image_h
+    self.im_w = image_w
+    self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
+
+    # Set UNet backbone
+    if canvas_h <= 32 and canvas_w <= 32:
+      ratio = 0.25
+    elif canvas_h == 224 and canvas_w == 224:
+      ratio = 1.0
+    
+    if image_init:
+      self.backbone = UNet(3, 3, ratio).to(device)
+      self.net_input = transforms.Resize((int(canvas_h / ratio), int(canvas_w / ratio)))(target.detach())
+    else:
+      self.backbone = UNet(3, 3, ratio).to(device)
+      self.net_input = get_noise(3, 'noise', (int(canvas_h / ratio), int(canvas_w / ratio))).to(device).detach()   
+  
+  def forward(self) -> Tensor:
+    weight = self.backbone(self.net_input)
+    weight = torch.squeeze(weight)
+    colors = torch.sigmoid(weight)
+    ## Smooth output:
+    #norm_weights = self.softmax(weight)
+    #colors = torch.matmul(norm_weights, self.palette)
+    #colors = colors.permute(2, 0, 1)
+    colors_upscaled = self.upsample(torch.unsqueeze(colors, 0))
+    colors_upscaled = torch.squeeze(colors_upscaled)
+
+    ## PA Output:
+    #norm_weights_pa = self.st_softmax(weight)
+    #colors_pa = torch.matmul(norm_weights_pa, self.palette)
+    #colors_pa = colors_pa.permute(2, 0, 1)
+    #colors_upscaled_pa = self.upsample(torch.unsqueeze(colors_pa, 0))
+    #colors_upscaled_pa = torch.squeeze(colors_upscaled_pa)
+
+    return colors_upscaled, colors_upscaled
+
 class Canvas_DIP(nn.Module):
   def __init__(self, device,
                palette: Tensor,
@@ -127,16 +176,17 @@ class Canvas_DIP(nn.Module):
     self.im_w = image_w
 
     # Set UNet backbone
-    small = False
     if canvas_h <= 32 and canvas_w <= 32:
-      small = True
+      ratio = 0.25
+    elif canvas_h == 224 and canvas_w == 224:
+      ratio = 1.0
     
     if image_init:
-      self.backbone = UNet(3, self.num_colors, small=small).to(device)
-      self.net_input = transforms.Resize((int(canvas_h * 4), int(canvas_w * 4)))(target.detach())
+      self.backbone = UNet(3, self.num_colors, ratio).to(device)
+      self.net_input = transforms.Resize((int(canvas_h / ratio), int(canvas_w / ratio)))(target.detach())
     else:
-      self.backbone = UNet(self.num_colors, self.num_colors, small=small).to(device)
-      self.net_input = get_noise(self.num_colors, 'noise', (int(canvas_h * 4), int(canvas_w * 4))).to(device).detach()   
+      self.backbone = UNet(self.num_colors, self.num_colors, ratio).to(device)
+      self.net_input = get_noise(self.num_colors, 'noise', (int(canvas_h / ratio), int(canvas_w / ratio))).to(device).detach()   
 
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
@@ -190,16 +240,17 @@ class Canvas_DIP_by_distance(nn.Module):
     self.im_w = image_w
 
     # Set UNet backbone
-    small = False
     if canvas_h <= 32 and canvas_w <= 32:
-      small = True
+      ratio = 0.25
+    elif canvas_h == 224 and canvas_w == 224:
+      ratio = 1.0
     
     if image_init:
-      self.backbone = UNet(3, self.num_colors, small=small).to(device)
-      self.net_input = transforms.Resize((int(canvas_h * 4), int(canvas_w * 4)))(target.detach())
+      self.backbone = UNet(3, self.num_colors, ratio).to(device)
+      self.net_input = transforms.Resize((int(canvas_h / ratio), int(canvas_w / ratio)))(target.detach())
     else:
-      self.backbone = UNet(self.num_colors, self.num_colors, small=small).to(device)
-      self.net_input = get_noise(self.num_colors, 'noise', (int(canvas_h * 4), int(canvas_w * 4))).to(device).detach()      
+      self.backbone = UNet(self.num_colors, self.num_colors, ratio).to(device)
+      self.net_input = get_noise(self.num_colors, 'noise', (int(canvas_h / ratio), int(canvas_w / ratio))).to(device).detach()   
 
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
@@ -247,9 +298,22 @@ def canvas_selector(device,
                     canvas_h: int, 
                     canvas_w: int, 
                     temperature: float,
-                    old_method: bool=False
+                    old_method: bool=False,
+                    no_palette: bool=False
                     ):
   _, _, im_h, im_w = target.size()
+
+  if no_palette:
+    print("Selecting: No Palette Canvas")
+    canvas = Canvas_No_Palette(device,
+                               target,
+                               canvas_h,
+                               canvas_w,
+                               im_h,
+                               im_w,
+                               image_init=image_init)
+    return canvas
+
   if use_dip:
     if by_distance:
       print("Selecting: DIP by distance")
