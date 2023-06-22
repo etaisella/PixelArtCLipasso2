@@ -58,7 +58,7 @@ to_tensor = transforms.ToTensor()
 @click.option("--by_distance", type=click.BOOL, required=False, default=False,
               help="whether to init the net input to the target image",
               show_default=True)
-@click.option("--temperature", type=click.FLOAT, required=False, default=1000.0,
+@click.option("--temperature", type=click.FLOAT, required=False, default=1.0,
               help="softmax temperature",
               show_default=True)
 @click.option("--canvas_h", type=click.INT, required=False, default=32,
@@ -90,19 +90,26 @@ to_tensor = transforms.ToTensor()
               help="geometric weight", show_default=True)
 @click.option("--shift_aware_weight", type=click.FLOAT, required=False, default=0.0,
               help="shift aware weight", show_default=True)
+@click.option("--sds_weight", type=click.FLOAT, required=False, default=0.0,
+              help="sds weight", show_default=True)
+@click.option("--sds_prompt", type=click.STRING, required=False, default="none",
+              help="sds prompt", show_default=True)
+
 
 # Training
-@click.option("--lr", type=click.FLOAT, required=False, default=0.00005,
+@click.option("--lr", type=click.FLOAT, required=False, default=0.011,
               help="learning rate", show_default=True)
+@click.option("--lr_temp", type=click.FLOAT, required=False, default=0.0,
+              help="learning rate for temperature", show_default=True)
 @click.option("--start_anneal_iter", type=click.INT, required=False, default=1500,
               help="Iteration in which we start to anneal learning rate", show_default=True)
 @click.option("--lr_gamma", type=click.FLOAT, required=False, default=1.0,
               help="gamma by which we reduce learning rate", show_default=True)
 @click.option("--save_freq", type=click.INT, required=False, default=100,
               help="frequency to save results in", show_default=True)
-@click.option("--epochs", type=click.INT, required=False, default=16000,
+@click.option("--epochs", type=click.INT, required=False, default=7000,
               help="number of epochs", show_default=True)
-@click.option("--start_semantics_iter", type=click.INT, required=False, default=1,
+@click.option("--start_semantics_iter", type=click.INT, required=False, default=1800,
               help="the epoch where we start using semantic losses", show_default=True)
 
 
@@ -127,6 +134,7 @@ def main(**kwargs) -> None:
     target, palette = get_target_and_palette(image_path, config.num_colors)
     wandb.log({"input": wandb.Image(target)}, step=0)
     wandb.log({"palette": wandb.Image(torch.unsqueeze(torch.permute(palette, (1, 0)), dim=-2))}, step=0)
+    print(f"config.sds_prompt - {config.sds_prompt}")
 
     # get canvas class
     canvas = canvas_selector(device, palette, target, config.use_dip, config.straight_through,
@@ -134,15 +142,16 @@ def main(**kwargs) -> None:
                             config.temperature, config.old_method, config.no_palette_mode)
     
     # set losses
-    loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware"], 
+    loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware", "sds"], 
                           torch.tensor([0.0]).to(device))
-    loss_dict_l2_only = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware"], 
+    loss_dict_l2_only = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware", "sds"], 
                           torch.tensor([0.0]).to(device))
     loss_dict["semantic"] = torch.tensor([config.semantic_weight]).to(device)
     loss_dict["style"] = torch.tensor([config.style_weight]).to(device)
     loss_dict["geometric"] = torch.tensor([config.geometric_weight]).to(device)
     loss_dict['l2'] = torch.tensor([config.l2_weight]).to(device)
     loss_dict['shift_aware'] = torch.tensor([config.shift_aware_weight]).to(device)
+    loss_dict['sds'] = torch.tensor([config.sds_weight]).to(device)
     clip_conv_layer_weights = [0, 0.0, 1.0, 1.0, 0]
 
     print(f"Loss dict: \n {loss_dict}")
@@ -155,7 +164,8 @@ def main(**kwargs) -> None:
                            clip_conv_layer_weights,
                            config.style_prompt,
                            config.canvas_h, 
-                           config.canvas_w,)
+                           config.canvas_w,
+                           config.sds_prompt)
     
     # loss function with l2 only
     loss_dict_l2_only['l2'] = torch.tensor([1.0]).to(device)
@@ -166,10 +176,15 @@ def main(**kwargs) -> None:
                            clip_conv_layer_weights,
                            config.style_prompt,
                            config.canvas_h, 
-                           config.canvas_w,)
+                           config.canvas_w,
+                           config.sds_prompt)
 
     # set optimizer & scheduler
-    optimizer = torch.optim.Adam(canvas.parameters(), lr=config.lr)
+    optimizer = torch.optim.Adam([
+                {'params': canvas.weight},
+                {'params': canvas.palette, 'lr': config.lr*0.01},
+                {'params': canvas.temperature, 'lr': config.lr_temp,}
+            ], lr=config.lr)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.lr_gamma)
 
     #----------------#
@@ -181,9 +196,15 @@ def main(**kwargs) -> None:
       optimizer.zero_grad()
       output, output_pa = canvas()
       if (iter >= config.start_semantics_iter):
-        loss, loss_dict = loss_fn_full(output)
+        optimizer.param_groups[0]['lr'] = config.lr*0.5
+        optimizer.param_groups[1]['lr'] = 0.0
+        loss, loss_dict = loss_fn_full(output, iter)
       else:
-        loss, loss_dict = loss_fn_l2_only(output)
+        loss, loss_dict = loss_fn_l2_only(output, iter)
+
+      temp_loss = (torch.tensor([1.0]).to(device) / canvas.temperature)
+      loss = loss + temp_loss
+      
       loss.backward()
       optimizer.step()
       if (iter % config.save_freq == 0) or (iter == config.epochs - 1):
@@ -202,8 +223,11 @@ def main(**kwargs) -> None:
         # wandb logging:
         wandb.log({"current learning rate:": float(scheduler.get_last_lr()[0])}, step=iter)
         wandb.log({"overall loss": loss.item()}, step=iter)
+        wandb.log({"temperature": canvas.temperature.detach().item()}, step=iter)
+        wandb.log({"temp loss": temp_loss.item()}, step=iter)
         wandb.log({"Output": wandb.Image(checkpoint["frame"])}, step=iter)
         wandb.log({"Output PA": wandb.Image(checkpoint["pixel art frame"])}, step=iter)
+        wandb.log({"palette": wandb.Image(torch.unsqueeze(torch.permute(canvas.palette.detach(), (1, 0)), dim=-2))}, step=iter)
         for k in loss_dict.keys():
           wandb.log({k + "_loss": loss_dict[k]}, step=iter)
         
@@ -221,7 +245,7 @@ def to8b(x: np.array) -> np.array:
 def plot_results(checkpoints, config):
   losses = [x['loss'] for x in checkpoints]
   tmp = min(losses)
-  idx = losses.index(tmp)
+  idx = len(losses) - 1
   frame = checkpoints[idx]['frame']
   frame_pil = to_PIL(frame)
   title = f"{config.num_colors} colors \n l2 {config.l2_weight}, semantic {config.semantic_weight},geometric {config.geometric_weight}, style {config.style_weight}\n use dip {config.use_dip},straight through {config.straight_through} \nby distance {config.by_distance}, image init {config.init_image} \nstyle prompt - {config.style_prompt}, old method {config.old_method}"

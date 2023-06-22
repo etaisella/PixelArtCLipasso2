@@ -31,8 +31,8 @@ class Canvas(nn.Module):
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
     self.weight = torch.nn.parameter.Parameter(data=weights, requires_grad=True)
-    self.palette = palette
-    self.temperature = temperature
+    self.palette = torch.nn.parameter.Parameter(data=palette, requires_grad=True)
+    self.temperature = torch.nn.parameter.Parameter(data=torch.tensor(temperature).to(device), requires_grad=True)
     if old_method:
       self.st_softmax = ST_SoftMax(temperature)
     else:
@@ -48,7 +48,7 @@ class Canvas(nn.Module):
     colors = colors.permute(2, 0, 1)
     colors_upscaled = self.upsample(torch.unsqueeze(colors, 0))
     colors_upscaled = torch.squeeze(colors_upscaled)
-    return colors_upscaled
+    return colors_upscaled, colors_upscaled
 
 ### Canvas Class by Distance: ###
 

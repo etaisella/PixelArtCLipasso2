@@ -5,6 +5,7 @@ import clip
 import numpy as np
 import matplotlib.pyplot as plt
 import wandb
+from sd import scoreDistillationLoss
 from PIL import Image
 from torchvision import transforms
 from torch import Tensor
@@ -96,7 +97,6 @@ class ShiftAwareLoss(torch.nn.Module):
 
       plt.tight_layout()
       wandb.log({"SA image": wandb.Image(plt)}, step=self.step)
-      plt.savefig('my_plot.png')
       plt.close()
 
 
@@ -109,9 +109,9 @@ class SemanticStyleLoss(torch.nn.Module):
     self.device = device
     self.loss_fn = torch.nn.BCELoss()
     self.clip_model = clip_model
-    text_prompts = ["a vibrant pink pixel art flamingo with black legs", 
-                    "pixelized image of a flamingo",
-                    "downsampled image of a flamingo"]
+    text_prompts = ["pixel art", 
+                    "pixelized image",
+                    "downsampled image"]
     text_prompts = [x.strip() for x in text_prompts]
 
     with torch.no_grad():
@@ -178,7 +178,8 @@ class PixelArtLoss(nn.Module):
                conv_weights,
                style_prompt,
                canvas_h,
-               canvas_w):
+               canvas_w,
+               sds_prompt):
     super().__init__()
     self.device = device
     self.clip_model = clip_model
@@ -190,7 +191,7 @@ class PixelArtLoss(nn.Module):
     else:
       text = clip.tokenize(style_prompt).to(device)
       self.target_features = clip_model.encode_text(text).detach()
-    self.text_style_feature = clip_model.encode_text(text).detach()
+    #self.text_style_feature = clip_model.encode_text(text).detach()
     self.weight_table = weight_dict
 
     # set loss classes
@@ -201,6 +202,14 @@ class PixelArtLoss(nn.Module):
     self.geometric_loss = GeometricLoss(clip_model, device, conv_weights, 
                                         self.target_preprocessed)
     self.shift_aware_loss = ShiftAwareLoss(target, canvas_h, canvas_w)
+    _, _, im_h, im_w = target.shape
+    self.sds_loss = scoreDistillationLoss(device, 
+                                          sds_prompt,
+                                          im_h,
+                                          im_w,
+                                          t_sched_start = 4500,
+                                          t_sched_freq = 600,
+                                          t_sched_gamma = 0.8)
 
     # set losses to apply and weights
     self.losses_to_apply = []
@@ -232,13 +241,22 @@ class PixelArtLoss(nn.Module):
       self.losses_to_apply.append(self.shift_aware_loss)
       self.weights_to_apply.append(weight_dict["shift_aware"])
     
+    if (weight_dict["sds"] != 0):
+      self.loss_names.append("sds")
+      self.losses_to_apply.append(self.sds_loss)
+      self.weights_to_apply.append(weight_dict["sds"])
+      w = weight_dict["sds"]
+      print(f"sds weight: {w}")
+    
 
-  def forward(self, x: Tensor, x_pa: Tensor=None) -> Tensor:
+  def forward(self, x: Tensor, global_step: int=0, x_pa: Tensor=None, ) -> Tensor:
     loss_dict = {}
     loss = torch.tensor([0.0]).to(self.device)
     for loss_fn, w, name in zip(self.losses_to_apply, self.weights_to_apply, self.loss_names):
       if name == "shift_aware" and x_pa != None:
         curr_loss = loss_fn(x_pa)
+      elif name == "sds":
+         curr_loss = loss_fn(x, global_step=global_step)
       else:
         curr_loss = loss_fn(x)
       loss_dict[name] = w * curr_loss.item()
