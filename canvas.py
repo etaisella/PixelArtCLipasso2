@@ -48,7 +48,7 @@ class Canvas(nn.Module):
     colors = colors.permute(2, 0, 1)
     colors_upscaled = self.upsample(torch.unsqueeze(colors, 0))
     colors_upscaled = torch.squeeze(colors_upscaled)
-    return colors_upscaled, colors_upscaled
+    return colors_upscaled, colors
 
 ### Canvas Class by Distance: ###
 

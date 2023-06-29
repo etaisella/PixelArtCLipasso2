@@ -1,5 +1,6 @@
 import torch
 import cv2
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -40,6 +41,8 @@ to_tensor = transforms.ToTensor()
 ## Required arguments:
 @click.option("-i", "--input_image", type=click.Path(file_okay=True, dir_okay=False),
               required=True, help="path to the target image")
+@click.option("-o", "--output_path", type=click.Path(file_okay=False, dir_okay=True),
+              required=True, help="path for training output")
 
 # Non-required Configurations options:
 # Pipeline
@@ -131,6 +134,8 @@ def main(**kwargs) -> None:
 
     # get image and palette
     image_path = "inputs" / Path(config.input_image)
+    output_path = Path(config.output_path)
+    os.makedirs(output_path, exist_ok=True)
     target, palette = get_target_and_palette(image_path, config.num_colors)
     wandb.log({"input": wandb.Image(target)}, step=0)
     wandb.log({"palette": wandb.Image(torch.unsqueeze(torch.permute(palette, (1, 0)), dim=-2))}, step=0)
@@ -194,7 +199,7 @@ def main(**kwargs) -> None:
     checkpoints = []
     for iter in range(config.epochs):
       optimizer.zero_grad()
-      output, output_pa = canvas()
+      output, output_small = canvas()
       if (iter >= config.start_semantics_iter):
         optimizer.param_groups[0]['lr'] = config.lr*0.5
         optimizer.param_groups[1]['lr'] = 0.0
@@ -212,7 +217,7 @@ def main(**kwargs) -> None:
         checkpoint["iteration"] = iter
         checkpoint["loss"] = loss.item()
         checkpoint["frame"] = torch.squeeze(output).cpu().detach()
-        checkpoint["pixel art frame"] = torch.squeeze(output_pa).cpu().detach()
+        checkpoint["pixel art frame"] = torch.squeeze(output_small).cpu().detach()
         checkpoints.append(checkpoint)
         print(f"Iter: {iter}, Loss: {loss.item()}")
 
@@ -230,9 +235,13 @@ def main(**kwargs) -> None:
         wandb.log({"palette": wandb.Image(torch.unsqueeze(torch.permute(canvas.palette.detach(), (1, 0)), dim=-2))}, step=iter)
         for k in loss_dict.keys():
           wandb.log({k + "_loss": loss_dict[k]}, step=iter)
+
+        filepath = output_path / f"output_{iter}.png"
+        plt.imsave(filepath, to8b(output_small.permute(1, 2, 0).detach().cpu().numpy()))
         
     # Save Results:
-    plot_results(checkpoints, config)
+    plot_lapse(checkpoints=checkpoints, output_path=output_path)
+    #plot_results(checkpoints, config)
     wandb.finish()
 
 ####################################
@@ -241,6 +250,39 @@ def main(**kwargs) -> None:
 
 def to8b(x: np.array) -> np.array:
     return (255 * np.clip(x, 0, 1)).astype(np.uint8)
+
+def plot_lapse(checkpoints, output_path):
+  frameSize = (600, 600)
+  fourcc = cv2.VideoWriter_fourcc(*'MP4V')
+  output_path_lapse = output_path / f"training_lapse.mp4"
+  out = cv2.VideoWriter(str(output_path_lapse), fourcc, 2.0, frameSize)
+  # font
+  font = cv2.FONT_HERSHEY_SIMPLEX
+  
+  # org
+  org = (35, 35)
+  
+  # fontScale
+  fontScale = 1
+  
+  # Blue color in BGR
+  color = (0, 0, 0)
+  
+  # Line thickness of 2 px
+  thickness = 2
+  for checkpoint in checkpoints:
+    frame = torch.permute(checkpoint["frame"], (1, 2, 0)).numpy()
+    img = to8b(frame)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, frameSize, interpolation = cv2.INTER_NEAREST)
+    iter = checkpoint["iteration"]
+    loss = checkpoint["loss"]
+    text = f"Iter: {iter:4}, Loss: {loss:6.4f}"
+    img = cv2.putText(img, text, org, font, fontScale, color, thickness, cv2.LINE_AA)
+    out.write(img)
+  
+  print("Finished rendering training lapse!")
+  out.release()
 
 def plot_results(checkpoints, config):
   losses = [x['loss'] for x in checkpoints]
