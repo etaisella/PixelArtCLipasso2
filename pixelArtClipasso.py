@@ -93,15 +93,19 @@ to_tensor = transforms.ToTensor()
               help="geometric weight", show_default=True)
 @click.option("--shift_aware_weight", type=click.FLOAT, required=False, default=0.0,
               help="shift aware weight", show_default=True)
-@click.option("--sds_weight", type=click.FLOAT, required=False, default=0.0,
+@click.option("--sds_weight", type=click.FLOAT, required=False, default=1.0,
               help="sds weight", show_default=True)
 @click.option("--sds_prompt", type=click.STRING, required=False, default="none",
               help="sds prompt", show_default=True)
 
 
 # Training
-@click.option("--lr", type=click.FLOAT, required=False, default=0.011,
+@click.option("--lr", type=click.FLOAT, required=False, default=0.005,
               help="learning rate", show_default=True)
+@click.option("--lr_palette", type=click.FLOAT, required=False, default=0.0001,
+              help="learning rate for warmup stage", show_default=True)
+@click.option("--lr_warmup", type=click.FLOAT, required=False, default=0.02,
+              help="learning rate for warmup stage", show_default=True)
 @click.option("--lr_temp", type=click.FLOAT, required=False, default=0.0,
               help="learning rate for temperature", show_default=True)
 @click.option("--start_anneal_iter", type=click.INT, required=False, default=1500,
@@ -136,15 +140,26 @@ def main(**kwargs) -> None:
     image_path = "inputs" / Path(config.input_image)
     output_path = Path(config.output_path)
     os.makedirs(output_path, exist_ok=True)
-    target, palette = get_target_and_palette(image_path, config.num_colors)
+    target, palette, bg_mask = get_target_and_palette(image_path, config.num_colors)
+    _, _, im_h, im_w = target.size()
     wandb.log({"input": wandb.Image(target)}, step=0)
     wandb.log({"palette": wandb.Image(torch.unsqueeze(torch.permute(palette, (1, 0)), dim=-2))}, step=0)
     print(f"config.sds_prompt - {config.sds_prompt}")
 
     # get canvas class
-    canvas = canvas_selector(device, palette, target, config.use_dip, config.straight_through,
-                            config.init_image, config.by_distance, config.canvas_h, config.canvas_w, 
-                            config.temperature, config.old_method, config.no_palette_mode)
+    #canvas = canvas_selector(device, palette, target, config.use_dip, config.straight_through,
+    #                        config.init_image, config.by_distance, config.canvas_h, config.canvas_w, 
+    #                        config.temperature, config.old_method, config.no_palette_mode)
+    canvas = Canvas(device,
+                    palette,
+                    config.canvas_h,
+                    config.canvas_w,
+                    im_h,
+                    im_w,
+                    bg_mask,
+                    config.temperature,
+                    config.old_method,
+                    config.no_palette_mode)
     
     # set losses
     loss_dict = dict.fromkeys(["l2", "semantic", "style", "geometric", "shift_aware", "sds"], 
@@ -187,9 +202,9 @@ def main(**kwargs) -> None:
     # set optimizer & scheduler
     optimizer = torch.optim.Adam([
                 {'params': canvas.weight},
-                {'params': canvas.palette, 'lr': config.lr*0.01},
-                {'params': canvas.temperature, 'lr': config.lr_temp,}
-            ], lr=config.lr)
+                {'params': canvas.palette, 'lr': config.lr_warmup*0.01},
+                {'params': canvas.temperature, 'lr': 0.001,}
+            ], lr=config.lr_warmup)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.lr_gamma)
 
     #----------------#
@@ -197,15 +212,23 @@ def main(**kwargs) -> None:
     #----------------#
 
     checkpoints = []
+    loss_fn = loss_fn_l2_only
+
     for iter in range(config.epochs):
       optimizer.zero_grad()
       output, output_small = canvas()
-      if (iter >= config.start_semantics_iter):
-        optimizer.param_groups[0]['lr'] = config.lr*0.5
-        optimizer.param_groups[1]['lr'] = 0.0
-        loss, loss_dict = loss_fn_full(output, iter)
-      else:
-        loss, loss_dict = loss_fn_l2_only(output, iter)
+
+      if (iter == config.start_semantics_iter):
+        # adjust learning rate for weights
+        optimizer.param_groups[0]['lr'] = config.lr
+        # adjust learning rate for palette
+        optimizer.param_groups[1]['lr'] = config.lr_palette
+        # adjust learning rate for temperature
+        optimizer.param_groups[2]['lr'] = config.lr_temp
+        # change loss function
+        loss_fn = loss_fn_full
+      
+      loss, loss_dict = loss_fn(output, iter)
 
       temp_loss = (torch.tensor([1.0]).to(device) / canvas.temperature)
       loss = loss + temp_loss
@@ -355,6 +378,16 @@ def plot_results(checkpoints, config):
 ########################### 
 
 def get_target_and_palette(img_filepath: str, num_clusters: int):
+  # if image has an alpha channel extract a binary mask from it
+  # check if image has alpha channel
+  has_alpha = Image.open(img_filepath).mode == 'RGBA'
+  if has_alpha:
+    alpha_layer = Image.open(img_filepath).getchannel('A')
+    background_mask = np.array(alpha_layer) < 255
+    background_mask = torch.from_numpy(background_mask).float()
+  else:
+    background_mask = None
+
   img = Image.open(img_filepath).convert("RGB")
   t_img = torch.unsqueeze(to_tensor(img), 0)
   open_cv_image = np.array(img) 
@@ -373,7 +406,7 @@ def get_target_and_palette(img_filepath: str, num_clusters: int):
   t_centers = to_tensor(center_pil)
   t_centers = torch.squeeze(torch.permute(t_centers, (2, 1, 0)))
 
-  return t_img.to(device), t_centers.to(device)
+  return t_img.to(device), t_centers.to(device), background_mask
 
 #################################
 ###### PLOTTING FUNCTIONS  ######

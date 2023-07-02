@@ -5,6 +5,7 @@ from torchvision import transforms
 from torch import Tensor
 from unet import UNet, get_noise
 from straightThroughSoftMax import ST_SoftMax, StraightThroughSoftMax
+from scipy.ndimage.morphology import binary_dilation
 
 ###############################
 ####### CANVAS CLASSES ########
@@ -17,10 +18,12 @@ class Canvas(nn.Module):
                canvas_w: int,
                image_h: int,
                image_w: int,
+               bg_mask: Tensor=None,
                temperature: float=1.0,
                old_method: bool=False, 
                straight_through=True):
     super().__init__()
+    self.has_bg_mask = bg_mask is not None
     self.num_colors = palette.size(dim=0)
     self.h = canvas_h
     self.w = canvas_w
@@ -30,7 +33,17 @@ class Canvas(nn.Module):
     nn.init.xavier_normal_(weights)
     self.straight_through = straight_through
     self.upsample = torch.nn.Upsample(size=(self.im_h, self.im_w))
+
+    # if bg_mask is not None, we need to make sure that the background is always white
+    if self.has_bg_mask:
+      # rescale bg_mask to canvas size
+      bg_mask = torch.nn.functional.interpolate(bg_mask.unsqueeze(0).unsqueeze(0), size=(self.h, self.w))
+      self.bg_mask = bg_mask.squeeze().bool()
+      self.fg_mask = ~self.bg_mask
+
     self.weight = torch.nn.parameter.Parameter(data=weights, requires_grad=True)
+    
+    # set other parameters
     self.palette = torch.nn.parameter.Parameter(data=palette, requires_grad=True)
     self.temperature = torch.nn.parameter.Parameter(data=torch.tensor(temperature).to(device), requires_grad=True)
     if old_method:
@@ -46,8 +59,18 @@ class Canvas(nn.Module):
       norm_weights = self.softmax(self.weight * self.temperature)
     colors = torch.matmul(norm_weights, self.palette)
     colors = colors.permute(2, 0, 1)
+    if self.has_bg_mask:
+      colors[:, self.bg_mask] = 1.0
+      # make black outline
+      fg_mask_numpy = self.fg_mask.cpu().numpy()
+      dilated_fg = binary_dilation(fg_mask_numpy, iterations=1)
+      outline_mask = torch.from_numpy(dilated_fg ^ fg_mask_numpy).to(self.weight.device)
+      colors[:, outline_mask] = 0.0
+
+
     colors_upscaled = self.upsample(torch.unsqueeze(colors, 0))
     colors_upscaled = torch.squeeze(colors_upscaled)
+
     return colors_upscaled, colors
 
 ### Canvas Class by Distance: ###
