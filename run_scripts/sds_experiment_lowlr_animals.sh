@@ -20,9 +20,10 @@ train() {
 	echo "Starting Training..."
 	python pixelArtClipasso.py \
 	-i ${1}/ \
-	-o results/${1}/h_${12}_w_${13}_c_${8}_lr_0.009_l2_${3}/ \
-	--lr=0.009 \
-	--lr_temp=0.01 \
+	-o results/${1}/h_${12}_w_${13}_c_${8}_lr_0.0023_l2_${3}/ \
+	--lr=0.0023 \
+	--lr_temp=0.001 \
+	--lr_palette=0.00001 \
 	--use_dip=${2} \
 	--l2_weight=${3} \
 	--semantic_weight=${4} \
@@ -41,8 +42,63 @@ train() {
 # STARTING RUN:
 
 # With straight through
-
-input=camel.png
+#
+#input=camel_nobg.png
+#use_dip=False
+#l2_weight=1300.0
+#sds_weight=1.0
+#semantic_weight=0.0
+#geometric_weight=0.0
+#style_weight=0.0
+#straight_through=True
+#num_colors=10
+#sds_prompt="an image of a cute camel over a white background in 16bit pixelart style"
+#no_palette_mode=False
+#canvas_h=32
+#canvas_w=32
+#
+#train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
+#$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
+#$canvas_h $canvas_w
+#
+#
+#input=flamingo_nobg.png
+#use_dip=False
+#l2_weight=1300.0
+#sds_weight=1.0
+#semantic_weight=0.0
+#geometric_weight=0.0
+#style_weight=0.0
+#straight_through=True
+#num_colors=10
+#sds_prompt="an image of a cute flamingo over a white background in 16bit pixelart style"
+#no_palette_mode=False
+#canvas_h=32
+#canvas_w=32
+#
+#train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
+#$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
+#$canvas_h $canvas_w
+#
+#input=horse_nobg.png
+#use_dip=False
+#l2_weight=1300.0
+#sds_weight=1.0
+#semantic_weight=0.0
+#geometric_weight=0.0
+#style_weight=0.0
+#straight_through=True
+#num_colors=10
+#sds_prompt="an image of a horse over a white background in 16bit pixelart style"
+#no_palette_mode=False
+#canvas_h=32
+#canvas_w=32
+#
+#train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
+#$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
+#$canvas_h $canvas_w
+#
+input=frog_nobg.png
 use_dip=False
 l2_weight=1300.0
 sds_weight=1.0
@@ -50,62 +106,7 @@ semantic_weight=0.0
 geometric_weight=0.0
 style_weight=0.0
 straight_through=True
-num_colors=5
-sds_prompt="an image of a cute camel over a white background in 16bit pixelart style"
-no_palette_mode=False
-canvas_h=32
-canvas_w=32
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
-$canvas_h $canvas_w
-
-
-input=flamingo.png
-use_dip=False
-l2_weight=1300.0
-sds_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=5
-sds_prompt="an image of a cute flamingo over a white background in 16bit pixelart style"
-no_palette_mode=False
-canvas_h=32
-canvas_w=32
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
-$canvas_h $canvas_w
-
-input=horse.png
-use_dip=False
-l2_weight=1300.0
-sds_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=5
-sds_prompt="an image of a horse over a white background in 16bit pixelart style"
-no_palette_mode=False
-canvas_h=32
-canvas_w=32
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
-$canvas_h $canvas_w
-
-input=frog.jpg
-use_dip=False
-l2_weight=1300.0
-sds_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=5
+num_colors=10
 sds_prompt="an image of a cute green frog over a white background in 16bit pixelart style"
 no_palette_mode=False
 canvas_h=32
@@ -114,22 +115,22 @@ canvas_w=32
 train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
 $style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
 $canvas_h $canvas_w
-
-input=cow.png
-use_dip=False
-l2_weight=1300.0
-sds_weight=1.0
-semantic_weight=0.0
-geometric_weight=0.0
-style_weight=0.0
-straight_through=True
-num_colors=5
-sds_prompt="an image of a cow over a white background in 16bit pixelart style"
-no_palette_mode=False
-canvas_h=32
-canvas_w=32
-
-train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
-$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
-$canvas_h $canvas_w
+#
+#input=cow_nobg.png
+#use_dip=False
+#l2_weight=1300.0
+#sds_weight=1.0
+#semantic_weight=0.0
+#geometric_weight=0.0
+#style_weight=0.0
+#straight_through=True
+#num_colors=10
+#sds_prompt="an image of a cow over a white background in 16bit pixelart style"
+#no_palette_mode=False
+#canvas_h=32
+#canvas_w=32
+#
+#train $input $use_dip $l2_weight $semantic_weight $geometric_weight \
+#$style_weight $straight_through $num_colors "$sds_prompt" $sds_weight $no_palette_mode \
+#$canvas_h $canvas_w
 

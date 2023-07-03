@@ -1,5 +1,9 @@
 from transformers import CLIPTextModel, CLIPTokenizer, logging
-from diffusers import AutoencoderKL, UNet2DConditionModel, DDIMScheduler
+from diffusers import AutoencoderKL, UNet2DConditionModel, DDIMScheduler, \
+    StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
+from sd_control import StableDiffusionControl
+from controlnet_aux import HEDdetector
+from diffusers.utils import load_image
 # suppress partial model loading warning
 logging.set_verbosity_error()
 
@@ -120,39 +124,6 @@ class StableDiffusion(nn.Module):
         # Cat for final embeddings
         text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
         return text_embeddings
-
-    # def get_attn_map(self, prompt, pred_rgb, timestamp=0, indices_to_fetch=[7], guidance_scale=100,  logvar=None):
-    #     prompt = [prompt]
-    #     batch_size = len(prompt)
-    #     controller = ca.AttentionStore()
-    #     ca.register_attention_control(self.unet, controller)
-    #     # interp to 512x512 to be fed into vae.
-
-    #     with torch.no_grad():
-    #         orig_im_h, orig_im_w = pred_rgb.shape[-2:]
-    #         text_embeddings = self.get_text_embeds(prompt, '')
-    #         pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
-    #         t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device)
-    #         if timestamp > 0:
-    #             t = torch.as_tensor(timestamp, dtype=torch.long, device=self.device)
-    #         latents = self.encode_imgs(pred_rgb_512)
-    #         latents = latents.expand(batch_size, self.unet.in_channels, 512 // 8, 512 // 8).to(self.device)
-    #         noise = torch.randn_like(latents)
-    #         latents_noisy = self.scheduler.add_noise(latents, noise, t)
-    #         latent_model_input = torch.cat([latents_noisy] * 2)
-    #         noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
-    #         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-    #         noise_pred = noise_pred_text + guidance_scale * (noise_pred_text - noise_pred_uncond)
-    #         latents = controller.step_callback(latents)
-
-    #         attn_maps = None
-    #         if indices_to_fetch is not None:
-    #             attn_maps = ca.aggregate_and_get_max_attention_per_token(
-    #                 prompts=prompt,
-    #                 attention_store=controller,
-    #                 indices_to_alter=indices_to_fetch, orig_im_h=orig_im_h, orig_im_w=orig_im_h
-    #             )
-    #     return attn_maps, t.item()
 
 
     def train_step(self, text_embeddings, pred_rgb, guidance_scale=100, global_step=-1, logvar=None):
@@ -297,7 +268,10 @@ class scoreDistillationLoss(nn.Module):
                  t_sched_start = 1500,
                  t_sched_freq = 500,
                  t_sched_gamma = 1.0,
-                 directional = False):
+                 directional = False,
+                 sds_control = False,
+                 control_image_path = None,
+                 output_path = None,):
         super().__init__()
         self.dir_to_indx_dict = {}
         self.directional = directional
@@ -305,11 +279,21 @@ class scoreDistillationLoss(nn.Module):
         self.image_width = image_width
 
         # get sd model
-        self.sd_model = StableDiffusion(device,
-                                        "2.0",
-                                        t_sched_start=t_sched_start,
-                                        t_sched_freq=t_sched_freq,
-                                        t_sched_gamma=t_sched_gamma)
+        if sds_control:
+            print("Using SDS Control")
+            self.sd_model = StableDiffusionControl(device,
+                                                   control_image_path=control_image_path,
+                                                   t_sched_start=t_sched_start,
+                                                   t_sched_freq=t_sched_freq,
+                                                   t_sched_gamma=t_sched_gamma,
+                                                   output_path=output_path)
+        else:
+            print("Using SD SDS")
+            self.sd_model = StableDiffusion(device,
+                                            "2.0",
+                                            t_sched_start=t_sched_start,
+                                            t_sched_freq=t_sched_freq,
+                                            t_sched_gamma=t_sched_gamma)
 
         # encode text
         if directional:

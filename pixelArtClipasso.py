@@ -7,6 +7,7 @@ from pathlib import Path
 from torchvision import transforms
 from datetime import datetime
 from PIL import Image
+from dpid import dpid
 import click
 import clip
 from canvas import *
@@ -97,6 +98,16 @@ to_tensor = transforms.ToTensor()
               help="sds weight", show_default=True)
 @click.option("--sds_prompt", type=click.STRING, required=False, default="none",
               help="sds prompt", show_default=True)
+@click.option("--sds_control", type=click.BOOL, required=False, default=False,
+              help="determines whether to use control-net + SDS", show_default=False)
+
+# timestep scheduling
+@click.option("--t_sched_start", type=click.INT, required=False, default=2500,
+              help="Iteration in which we start to anneal timesteps", show_default=True)
+@click.option("--t_sched_freq", type=click.INT, required=False, default=600,
+              help="Frequency in which to lower timestep", show_default=True)
+@click.option("--t_sched_gamma", type=click.FLOAT, required=False, default=0.8,
+              help="timestep lowering gamma", show_default=True)
 
 
 # Training
@@ -108,13 +119,15 @@ to_tensor = transforms.ToTensor()
               help="learning rate for warmup stage", show_default=True)
 @click.option("--lr_temp", type=click.FLOAT, required=False, default=0.0,
               help="learning rate for temperature", show_default=True)
-@click.option("--start_anneal_iter", type=click.INT, required=False, default=1500,
+@click.option("--start_anneal_iter", type=click.INT, required=False, default=3000,
               help="Iteration in which we start to anneal learning rate", show_default=True)
-@click.option("--lr_gamma", type=click.FLOAT, required=False, default=1.0,
+@click.option("--lr_step_size", type=click.INT, required=False, default=500,
+              help="gamma by which we reduce learning rate", show_default=True)
+@click.option("--lr_gamma", type=click.FLOAT, required=False, default=0.75,
               help="gamma by which we reduce learning rate", show_default=True)
 @click.option("--save_freq", type=click.INT, required=False, default=100,
               help="frequency to save results in", show_default=True)
-@click.option("--epochs", type=click.INT, required=False, default=7000,
+@click.option("--epochs", type=click.INT, required=False, default=5000,
               help="number of epochs", show_default=True)
 @click.option("--start_semantics_iter", type=click.INT, required=False, default=1800,
               help="the epoch where we start using semantic losses", show_default=True)
@@ -140,16 +153,18 @@ def main(**kwargs) -> None:
     image_path = "inputs" / Path(config.input_image)
     output_path = Path(config.output_path)
     os.makedirs(output_path, exist_ok=True)
-    target, palette, bg_mask = get_target_and_palette(image_path, config.num_colors)
+    target, palette, bg_mask = get_target_and_palette(image_path, config.num_colors, do_dpid=True)
+
+    # log target image
     _, _, im_h, im_w = target.size()
     wandb.log({"input": wandb.Image(target)}, step=0)
+    filepath_target = output_path / f"target.png"
+    plt.imsave(filepath_target, to8b(target.squeeze().permute(1, 2, 0).detach().cpu().numpy()))
+
     wandb.log({"palette": wandb.Image(torch.unsqueeze(torch.permute(palette, (1, 0)), dim=-2))}, step=0)
     print(f"config.sds_prompt - {config.sds_prompt}")
 
     # get canvas class
-    #canvas = canvas_selector(device, palette, target, config.use_dip, config.straight_through,
-    #                        config.init_image, config.by_distance, config.canvas_h, config.canvas_w, 
-    #                        config.temperature, config.old_method, config.no_palette_mode)
     canvas = Canvas(device,
                     palette,
                     config.canvas_h,
@@ -185,7 +200,13 @@ def main(**kwargs) -> None:
                            config.style_prompt,
                            config.canvas_h, 
                            config.canvas_w,
-                           config.sds_prompt)
+                           config.sds_prompt,
+                           t_sched_start=config.t_sched_start,
+                           t_sched_freq=config.t_sched_freq,
+                           t_sched_gamma=config.t_sched_gamma,
+                           sds_control=config.sds_control,
+                           control_image_path=image_path,
+                           output_path=output_path)
     
     # loss function with l2 only
     loss_dict_l2_only['l2'] = torch.tensor([1.0]).to(device)
@@ -205,7 +226,6 @@ def main(**kwargs) -> None:
                 {'params': canvas.palette, 'lr': config.lr_warmup*0.01},
                 {'params': canvas.temperature, 'lr': 0.001,}
             ], lr=config.lr_warmup)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.lr_gamma)
 
     #----------------#
     # Training Loop:
@@ -246,10 +266,11 @@ def main(**kwargs) -> None:
 
         # LR Scheduling:
         if iter >= config.start_anneal_iter:
-          scheduler.step()
+          if iter % config.lr_step_size == 0:
+            optimizer.param_groups[0]['lr'] *= config.lr_gamma
 
         # wandb logging:
-        wandb.log({"current learning rate:": float(scheduler.get_last_lr()[0])}, step=iter)
+        wandb.log({"current learning rate:": float(optimizer.param_groups[0]['lr'])}, step=iter)
         wandb.log({"overall loss": loss.item()}, step=iter)
         wandb.log({"temperature": canvas.temperature.detach().item()}, step=iter)
         wandb.log({"temp loss": temp_loss.item()}, step=iter)
@@ -377,18 +398,33 @@ def plot_results(checkpoints, config):
 ######    IMAGE IO    #####
 ########################### 
 
-def get_target_and_palette(img_filepath: str, num_clusters: int):
+def get_target_and_palette(img_filepath: str, 
+                           num_clusters: int, 
+                           im_h: int = 512, 
+                           im_w: int = 512,
+                           do_dpid: bool = False,):
   # if image has an alpha channel extract a binary mask from it
   # check if image has alpha channel
   has_alpha = Image.open(img_filepath).mode == 'RGBA'
+
+  # TODO: Make this prettier
   if has_alpha:
     alpha_layer = Image.open(img_filepath).getchannel('A')
     background_mask = np.array(alpha_layer) < 255
     background_mask = torch.from_numpy(background_mask).float()
+    # TODO: Support for no alpha as well
+    img = Image.open(img_filepath).convert("RGBA")
+    img = img.resize((im_h, im_w), Image.BILINEAR)
+    # perform DPID if required
+    if do_dpid:
+      img = np.array(img)
+      img = dpid(input=img, d=16, lamb=0.8)
+      img = Image.fromarray(img).convert("RGB")
   else:
+    img = Image.open(img_filepath).convert("RGB")
+    img = img.resize((im_h, im_w), Image.BILINEAR)
     background_mask = None
 
-  img = Image.open(img_filepath).convert("RGB")
   t_img = torch.unsqueeze(to_tensor(img), 0)
   open_cv_image = np.array(img) 
   

@@ -179,7 +179,13 @@ class PixelArtLoss(nn.Module):
                style_prompt,
                canvas_h,
                canvas_w,
-               sds_prompt):
+               sds_prompt,
+               t_sched_start = 4500,
+               t_sched_freq = 600,
+               t_sched_gamma = 0.8,
+               sds_control: bool = False,
+               control_image_path: str = None,
+               output_path: str = None,):
     super().__init__()
     self.device = device
     self.clip_model = clip_model
@@ -203,13 +209,18 @@ class PixelArtLoss(nn.Module):
                                         self.target_preprocessed)
     self.shift_aware_loss = ShiftAwareLoss(target, canvas_h, canvas_w)
     _, _, im_h, im_w = target.shape
+    
+    # set up SDS
     self.sds_loss = scoreDistillationLoss(device, 
                                           sds_prompt,
                                           im_h,
                                           im_w,
-                                          t_sched_start = 4500,
-                                          t_sched_freq = 600,
-                                          t_sched_gamma = 0.8)
+                                          t_sched_start=t_sched_start,
+                                          t_sched_freq=t_sched_freq,
+                                          t_sched_gamma=t_sched_gamma,
+                                          sds_control=sds_control,
+                                          control_image_path=control_image_path,
+                                          output_path=output_path,)
 
     # set losses to apply and weights
     self.losses_to_apply = []
